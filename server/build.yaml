@@ -1,0 +1,10 @@
+targets:
+  $default:
+    builders:
+      drift_dev:
+        options:
+          # Unit tests use in-memory SQLite; production uses PostgreSQL.
+          sql:
+            dialects:
+              - sqlite
+              - postgres

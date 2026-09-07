@@ -1,0 +1,7 @@
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    # `if (x != null) 'k': x` is used deliberately in request bodies because
+    # several fields are intentionally sent as explicit nulls (to clear them).
+    use_null_aware_elements: false
