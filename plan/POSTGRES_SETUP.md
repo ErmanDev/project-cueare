@@ -11,7 +11,7 @@ DBeaver, pgAdmin, HeidiSQL, or similar tools.
 
 ## Prerequisites
 
-- Dart / Flutter SDK on PATH (`dart --version`)
+- Node.js 20+ on PATH (`node --version`)
 - PostgreSQL running locally (this machine has service `postgresql-x64-18`)
 - Your `postgres` user password (set during Postgres install)
 
@@ -49,15 +49,15 @@ The server loads `.env` automatically (process env vars still override it).
 
 ```powershell
 cd server
-dart pub get
-dart run tool/ensure_database.dart   # CREATE DATABASE ssc_attendance if missing
-dart run tool/seed_admin.dart        # creates admin / changeme123
+npm install
+npm run ensure-db            # CREATE DATABASE aclc if missing
+npm run seed-admin           # creates admin / changeme123
 ```
 
 Reset password later:
 
 ```powershell
-dart run tool/seed_admin.dart admin newpassword
+npm run seed-admin -- admin newpassword
 ```
 
 ---
@@ -65,15 +65,13 @@ dart run tool/seed_admin.dart admin newpassword
 ## 3. Start the API
 
 ```powershell
-dart pub global activate dart_frog_cli   # once
-dart_frog dev --port 8080
+npm run dev
 ```
 
-Or production-style:
+Or without the watcher:
 
 ```powershell
-dart_frog build
-dart build/bin/server.dart
+npm start
 ```
 
 Check health in a browser:
@@ -120,6 +118,8 @@ Connect with **DBeaver**, **pgAdmin**, **HeidiSQL**, etc.:
 Useful query while testing scans:
 
 ```sql
+SET search_path TO ssc;
+
 SELECT id, direction, status, scanned_at, student_id, session_window_id
 FROM attendance_logs
 ORDER BY scanned_at DESC
@@ -137,6 +137,7 @@ LIMIT 50;
 Then:
 
 ```sql
+SET search_path TO ssc;
 \dt
 SELECT * FROM users;
 SELECT * FROM attendance_logs ORDER BY id DESC LIMIT 20;
@@ -178,19 +179,18 @@ SELECT * FROM attendance_logs ORDER BY id DESC LIMIT 20;
 | Problem                                    | Fix                                                                                             |
 | ------------------------------------------ | ----------------------------------------------------------------------------------------------- |
 | `password authentication failed`           | Wrong `DATABASE_PASSWORD` / `DATABASE_URL` — match the password you set for the `postgres` user |
-| `database "ssc_attendance" does not exist` | Run `dart run tool/ensure_database.dart`                                                        |
-| GUI can't connect                          | Confirm service `postgresql-x64-18` is Running; host `localhost`, port `5432`                   |
+| `database "aclc" does not exist` | Run `npm run ensure-db` |
+| GUI can't connect                          | Confirm service `postgresql-x64-18` is Running; host `localhost`, port `5432`; schema `ssc` |
 | Phone can't reach API                      | Same Wi-Fi, firewall allows 8080, correct LAN IP in app settings                                |
 | Old `attendance.db` file                   | Unused after Postgres migration — safe to delete                                                |
 
-Unit tests still use **in-memory SQLite** (`dart test`) and do not need Postgres.
+Unit tests: `npm test`. Attendance engine tests need a reachable Postgres.
 
 ## add superadmin
 
-1. Change the admin password — default is admin
-   / changeme123. Re-run:
+1. Change the admin password — default is admin / changeme123. Re-run:
 
-   dart run tool/seed_admin.dart youruser
-   yourpassword
-
-dart run tool/seed_admin.dart erman epass
+```powershell
+npm run seed-admin -- youruser yourpassword
+npm run seed-admin -- erman epass
+```

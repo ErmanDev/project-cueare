@@ -1,0 +1,37 @@
+{
+  "name": "ssc-qr-attendance-server",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "SSC QR Attendance REST API (Express + TypeScript + PostgreSQL)",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "ensure-db": "tsx scripts/ensure-database.ts",
+    "seed-admin": "tsx scripts/seed-admin.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.16.3",
+    "swagger-ui-express": "^5.0.1"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^4.17.23",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^24.5.2",
+    "@types/pg": "^8.15.5",
+    "@types/swagger-ui-express": "^4.1.8",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

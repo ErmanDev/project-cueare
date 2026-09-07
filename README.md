@@ -1,12 +1,12 @@
 # SSC QR Attendance
 
-LAN-only QR event attendance: a **Dart Frog + PostgreSQL** server (runs on a laptop) and a
-**Flutter** app (moderator phones scan student QR codes; superadmin manages everything;
-students can display their own QR). No internet or cloud required — every device just
-joins the same Wi-Fi router.
+LAN-only QR event attendance: an **Express + TypeScript + PostgreSQL** REST API (runs on a
+laptop) and a **Flutter** app (moderator phones scan student QR codes; superadmin manages
+everything; students can display their own QR). No internet or cloud required — every
+device just joins the same Wi-Fi router.
 
 ```
-/server   Dart Frog API + Drift/PostgreSQL
+/server   Express + TypeScript REST API + PostgreSQL
 /app      Flutter app (Android / iOS; Windows build works for admin screens only)
 /plan     Original build plan + backend / Postgres setup notes
 ```
@@ -36,9 +36,9 @@ $env:DATABASE_PASSWORD = 'YOUR_POSTGRES_PASSWORD'
 2. Create the database + seed the admin:
 
 ```powershell
-dart pub get
-dart run tool/ensure_database.dart   # CREATE DATABASE ssc_attendance if missing
-dart run tool/seed_admin.dart        # admin / changeme123
+npm install
+npm run ensure-db      # CREATE DATABASE aclc if missing
+npm run seed-admin     # admin / changeme123
 ```
 
 ### Monitor in a GUI (DBeaver / pgAdmin / HeidiSQL)
@@ -62,16 +62,14 @@ Tables appear after the first server start / seed (`users`, `students`, `events`
 
 ```powershell
 cd server
-dart pub get
-dart pub global activate dart_frog_cli   # once
-dart_frog dev --port 8080                # hot reload
+npm install
+npm run dev              # tsx watch, port 8080 (or PORT env)
 ```
 
-For events, prefer the production build (no hot-reload overhead):
+For events, run without the file watcher:
 
 ```powershell
-dart_frog build
-dart build/bin/server.dart               # PORT env var overrides 8080
+npm start                # PORT env var overrides 8080
 ```
 
 Then:
@@ -79,15 +77,16 @@ Then:
 1. `ipconfig` → note the Wi-Fi adapter's **IPv4 address** (e.g. `192.168.1.10`).
 2. Allow inbound TCP **8080** in Windows Firewall (Advanced settings → Inbound Rules → New Rule → Port).
 3. From a phone browser open `http://192.168.1.10:8080/` — you should see `{"status":"ok", "database":"postgres@localhost:5432/ssc_attendance", ...}`.
+   Swagger UI (laptop browser): `http://localhost:8080/docs`.
 
 Runtime file (git-ignored): `jwt_secret.txt` (auto-generated; delete it to invalidate all logins).
 
 Optional env vars: `DATABASE_URL` (or `DATABASE_HOST` / `PORT` / `NAME` / `USER` / `PASSWORD`),
 `JWT_SECRET`, `JWT_TTL_HOURS` (default 12), `QR_HMAC_SECRET`.
 
-Reset the admin password: `dart run tool/seed_admin.dart admin newpassword`.
+Reset the admin password: `npm run seed-admin -- admin newpassword`.
 
-Tests: `dart test` (still use in-memory SQLite — no Postgres required for unit tests).
+Tests: `npm test` (unit tests always; attendance engine tests need Postgres).
 
 ## 2. Run the app (phones)
 
@@ -152,4 +151,4 @@ GET  /student/:code/qr        GET /student/:code/attendance
   session manually or fix the windows in the event editor.
 * **Camera black on Android** — grant camera permission; the app also has a
   "type code manually" fallback (keyboard icon on the scanner).
-* **Forgot admin password** — `dart run tool/seed_admin.dart admin newpass`.
+* **Forgot admin password** — `npm run seed-admin -- admin newpass`.

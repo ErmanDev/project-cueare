@@ -1,12 +1,17 @@
 # server
 
-[![style: dart frog lint][dart_frog_lint_badge]][dart_frog_lint_link]
-[![License: MIT][license_badge]][license_link]
-[![Powered by Dart Frog](https://img.shields.io/endpoint?url=https://tinyurl.com/dartfrog-badge)](https://dart-frog.dev)
+Express + TypeScript REST API for SSC QR Attendance. PostgreSQL schema `ssc`.
 
-An example application built with dart_frog
+```powershell
+npm install
+npm run ensure-db
+npm run seed-admin
+npm run dev
+```
 
-[dart_frog_lint_badge]: https://img.shields.io/badge/style-dart_frog_lint-1DF9D2.svg
-[dart_frog_lint_link]: https://pub.dev/packages/dart_frog_lint
-[license_badge]: https://img.shields.io/badge/license-MIT-blue.svg
-[license_link]: https://opensource.org/licenses/MIT
+API listens on `0.0.0.0:8080`. Flutter app Server Settings: `YOUR_LAN_IP:8080`.
+
+Swagger UI: [http://localhost:8080/docs](http://localhost:8080/docs)  
+OpenAPI JSON: [http://localhost:8080/openapi.json](http://localhost:8080/openapi.json)
+
+Use **Authorize** in Swagger after `POST /auth/login` and paste the JWT.
