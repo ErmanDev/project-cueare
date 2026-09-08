@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/api/repositories.dart';
 import '../../../widgets/error_banner.dart';
+import '../../../widgets/page_scaffold.dart';
 import '../admin_providers.dart';
 
 /// Paste CSV text (from Excel / Google Sheets) to bulk-create students.
@@ -66,7 +67,8 @@ class _BulkImportScreenState extends ConsumerState<BulkImportScreen> {
     final result = _result;
     return Scaffold(
       appBar: AppBar(title: const Text('Bulk import students')),
-      body: ListView(
+      body: AppContentWidth(
+        child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           Text(
@@ -161,6 +163,7 @@ class _BulkImportScreenState extends ConsumerState<BulkImportScreen> {
             ),
           ],
         ],
+        ),
       ),
     );
   }

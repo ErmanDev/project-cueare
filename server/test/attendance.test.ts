@@ -51,7 +51,10 @@ describe('AttendanceService', () => {
     fakeNow = new Date(2026, 8, 5, 8, 30);
     service = new AttendanceService(pool, { clock: () => fakeNow });
     await pool.query(
-      `TRUNCATE attendance_logs, session_windows, events, students, users RESTART IDENTITY CASCADE`,
+      `TRUNCATE "AttendanceLogs", "AttendanceCorrections", "AttendanceRecords",
+               "EventParticipants", "EventSessions", "Events",
+               "StudentEnrollments", "Students", "Sections", "Users"
+       RESTART IDENTITY CASCADE`,
     );
     const admin = await q.insertUser(pool, {
       name: 'Admin',
@@ -378,7 +381,7 @@ describe('AttendanceService', () => {
     it('preview writes nothing', async () => {
       if (!dbReady) return;
       await service.preview({ eventId, qrPayload: 'STU-2026-0001' });
-      const rows = await pool.query('SELECT * FROM attendance_logs');
+      const rows = await pool.query('SELECT * FROM "AttendanceLogs"');
       expect(rows.rows).toEqual([]);
     });
   });

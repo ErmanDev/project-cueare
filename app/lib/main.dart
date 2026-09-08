@@ -1,3 +1,5 @@
+import 'dart:ui' show PointerDeviceKind;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -17,6 +19,17 @@ void main() {
   );
 }
 
+/// Mouse / trackpad dragging so lists and RefreshIndicator work in the browser.
+class AppScrollBehavior extends MaterialScrollBehavior {
+  @override
+  Set<PointerDeviceKind> get dragDevices => {
+    PointerDeviceKind.touch,
+    PointerDeviceKind.mouse,
+    PointerDeviceKind.stylus,
+    PointerDeviceKind.trackpad,
+  };
+}
+
 class SscAttendanceApp extends StatelessWidget {
   const SscAttendanceApp({super.key});
 
@@ -25,6 +38,7 @@ class SscAttendanceApp extends StatelessWidget {
     return MaterialApp(
       title: 'SSC QR Attendance',
       debugShowCheckedModeBanner: false,
+      scrollBehavior: AppScrollBehavior(),
       theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),
       home: const RoleGate(),

@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
+    "build:web": "tsx scripts/build-web.ts",
     "ensure-db": "tsx scripts/ensure-database.ts",
     "seed-admin": "tsx scripts/seed-admin.ts",
     "test": "vitest run",

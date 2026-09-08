@@ -224,6 +224,13 @@ abstract class AppTheme {
         labelStyle: text.labelMedium,
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
       ),
+      segmentedButtonTheme: SegmentedButtonThemeData(
+        style: ButtonStyle(
+          visualDensity: VisualDensity.standard,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          minimumSize: const WidgetStatePropertyAll(Size(0, 44)),
+        ),
+      ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           minimumSize: const Size.fromHeight(48),

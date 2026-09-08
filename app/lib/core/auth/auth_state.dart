@@ -1,11 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../models/user_model.dart';
 import '../api/api_client.dart';
 import '../api/api_endpoints.dart';
 import 'auth_token.dart';
+import 'session_store.dart';
 
 /// Who is using the app right now.
 sealed class AuthSession {
@@ -32,7 +32,6 @@ class StudentSession extends AuthSession {
 }
 
 class AuthNotifier extends AsyncNotifier<AuthSession> {
-  static const _storage = FlutterSecureStorage();
   static const _tokenKey = 'auth_token';
   static const _userKey = 'auth_user_json';
   static const _studentKey = 'student_code';
@@ -55,12 +54,12 @@ class AuthNotifier extends AsyncNotifier<AuthSession> {
     }
 
     final liveToken = ref.read(authTokenProvider);
-    final token = liveToken ?? await _storage.read(key: _tokenKey);
+    final token = liveToken ?? await SessionStore.read(_tokenKey);
     if (token == null || token.isEmpty) return const SignedOut();
 
     // Restore the cached user immediately, then validate against the server
     // in the background (handles expired tokens / deleted accounts).
-    final userJson = await _storage.read(key: _userKey);
+    final userJson = await SessionStore.read(_userKey);
     UserModel? user;
     if (userJson != null) {
       try {
@@ -78,7 +77,7 @@ class AuthNotifier extends AsyncNotifier<AuthSession> {
         final api = ref.read(apiClientProvider);
         final me = await api.getJson(ApiEndpoints.me);
         user = UserModel.fromJson(me['user'] as Map<String, dynamic>);
-        await _storage.write(key: _userKey, value: _encode(user));
+        await SessionStore.write(_userKey, _encode(user));
       } catch (_) {
         await _clearStaff();
         return const SignedOut();
@@ -96,15 +95,20 @@ class AuthNotifier extends AsyncNotifier<AuthSession> {
     });
     final token = res['token'] as String;
     final user = UserModel.fromJson(res['user'] as Map<String, dynamic>);
-    await _storage.write(key: _tokenKey, value: token);
-    await _storage.write(key: _userKey, value: _encode(user));
+    await SessionStore.write(_tokenKey, token);
+    await SessionStore.write(_userKey, _encode(user));
     ref.read(authTokenProvider.notifier).set(token);
     state = AsyncData(StaffSession(user: user, token: token));
   }
 
-  /// Student "login": just remember the code locally (validated on use).
+  /// Student "login": confirm the code exists, then remember it locally.
   Future<void> enterAsStudent(String studentIdCode) async {
     final code = studentIdCode.trim();
+    if (code.isEmpty) {
+      throw const ApiFailure(message: 'Enter your student code');
+    }
+    final api = ref.read(apiClientProvider);
+    await api.getJson(ApiEndpoints.studentQr(code));
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_studentKey, code);
     state = AsyncData(StudentSession(studentIdCode: code));
@@ -119,8 +123,8 @@ class AuthNotifier extends AsyncNotifier<AuthSession> {
   }
 
   Future<void> _clearStaff() async {
-    await _storage.delete(key: _tokenKey);
-    await _storage.delete(key: _userKey);
+    await SessionStore.delete(_tokenKey);
+    await SessionStore.delete(_userKey);
   }
 
   static String _encode(UserModel u) =>

@@ -22,7 +22,8 @@ class ModeratorsScreen extends ConsumerWidget {
         icon: const Icon(Icons.person_add),
         label: const Text('Add moderator'),
       ),
-      body: RefreshIndicator(
+      body: AppContentWidth(
+        child: RefreshIndicator(
         onRefresh: () => ref.refresh(moderatorsProvider.future),
         child: AsyncValueWidget(
           value: moderators,
@@ -78,6 +79,7 @@ class ModeratorsScreen extends ConsumerWidget {
               },
             );
           },
+        ),
         ),
       ),
     );

@@ -1,7 +1,7 @@
 import pg from 'pg';
 
 import { databaseDisplay, getConfig, type DatabaseConfig } from '../config.ts';
-import { schemaStatements } from './schema.ts';
+import { addMissingConstraints, dropTenantsIfPresent, importLegacyData, migrateLegacyTables, renameSnakeToPascal, schemaStatements, seedFoundation } from './schema.ts';
 
 const { Pool, types } = pg;
 
@@ -72,9 +72,18 @@ export async function ensureSchema(
 ): Promise<void> {
   const client = await pool.connect();
   try {
+    const schemaName = assertIdent(schema);
+    await client.query(`CREATE SCHEMA IF NOT EXISTS ${schemaName}`);
+    await client.query(`SET search_path TO ${schemaName}`);
+    await migrateLegacyTables(client);
+    await dropTenantsIfPresent(client);
+    await renameSnakeToPascal(client);
     for (const sql of schemaStatements(schema)) {
       await client.query(sql);
     }
+    await addMissingConstraints(client);
+    await seedFoundation(client);
+    await importLegacyData(client);
   } finally {
     client.release();
   }

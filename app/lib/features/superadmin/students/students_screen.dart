@@ -108,7 +108,8 @@ class _StudentsScreenState extends ConsumerState<StudentsScreen> {
         icon: const Icon(Icons.add),
         label: const Text('Add student'),
       ),
-      body: RefreshIndicator(
+      body: AppContentWidth(
+        child: RefreshIndicator(
         onRefresh: () => ref.refresh(studentsProvider.future),
         child: AsyncValueWidget(
           value: students,
@@ -195,6 +196,7 @@ class _StudentsScreenState extends ConsumerState<StudentsScreen> {
               },
             );
           },
+        ),
         ),
       ),
     );

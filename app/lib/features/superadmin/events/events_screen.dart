@@ -69,7 +69,8 @@ class EventsScreen extends ConsumerWidget {
         icon: const Icon(Icons.add),
         label: const Text('New event'),
       ),
-      body: RefreshIndicator(
+      body: AppContentWidth(
+        child: RefreshIndicator(
         onRefresh: () => ref.refresh(eventsProvider.future),
         child: AsyncValueWidget(
           value: events,
@@ -186,6 +187,7 @@ class EventsScreen extends ConsumerWidget {
               },
             );
           },
+        ),
         ),
       ),
     );

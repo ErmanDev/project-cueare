@@ -7,6 +7,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
 import '../../models/event_model.dart';
 import '../../widgets/async_value_widget.dart';
+import '../../widgets/page_scaffold.dart';
 import '../../widgets/section_header.dart';
 import '../../widgets/status_chip.dart';
 import '../auth/server_config_screen.dart';
@@ -61,7 +62,8 @@ class ModeratorDashboardScreen extends ConsumerWidget {
           ),
         ],
       ),
-      body: RefreshIndicator(
+      body: AppContentWidth(
+        child: RefreshIndicator(
         onRefresh: () => ref.refresh(activeEventsProvider.future),
         child: ListView(
           padding: AppTheme.pagePadding,
@@ -196,6 +198,7 @@ class ModeratorDashboardScreen extends ConsumerWidget {
               ),
             ],
           ],
+        ),
         ),
       ),
     );

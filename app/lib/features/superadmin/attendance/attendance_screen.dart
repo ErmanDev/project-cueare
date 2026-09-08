@@ -8,6 +8,7 @@ import '../../../core/utils/formatters.dart';
 import '../../../models/attendance_log_model.dart';
 import '../../../widgets/async_value_widget.dart';
 import '../../../widgets/error_banner.dart';
+import '../../../widgets/page_scaffold.dart';
 import '../admin_providers.dart';
 import 'attendance_edit_dialog.dart';
 
@@ -142,7 +143,8 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
           ),
         ],
       ),
-      body: Column(
+      body: AppContentWidth(
+        child: Column(
         children: [
           // ---- filters ----
           Material(
@@ -329,6 +331,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
             ),
           ),
         ],
+        ),
       ),
     );
   }

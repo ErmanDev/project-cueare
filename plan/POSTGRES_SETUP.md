@@ -30,7 +30,7 @@ Edit `.env` and set your real password:
 ```env
 DATABASE_HOST=localhost
 DATABASE_PORT=5432
-DATABASE_NAME=ssc_attendance
+DATABASE_NAME=aclc
 DATABASE_USER=postgres
 DATABASE_PASSWORD=YOUR_REAL_PASSWORD
 ```
@@ -38,7 +38,7 @@ DATABASE_PASSWORD=YOUR_REAL_PASSWORD
 Or use a single URL instead:
 
 ```env
-DATABASE_URL=postgres://postgres:YOUR_REAL_PASSWORD@localhost:5432/ssc_attendance
+DATABASE_URL=postgres://postgres:YOUR_REAL_PASSWORD@localhost:5432/aclc
 ```
 
 The server loads `.env` automatically (process env vars still override it).
@@ -86,7 +86,7 @@ You should see JSON like:
 {
   "name": "SSC QR Attendance API",
   "status": "ok",
-  "database": "postgres@localhost:5432/ssc_attendance"
+  "database": "postgres@localhost:5432/aclc"
 }
 ```
 
@@ -100,7 +100,7 @@ Connect with **DBeaver**, **pgAdmin**, **HeidiSQL**, etc.:
 | -------- | ---------------------- |
 | Host     | `localhost`            |
 | Port     | `5432`                 |
-| Database | `ssc_attendance`       |
+| Database | `aclc`                 |
 | User     | `postgres`             |
 | Password | your Postgres password |
 | SSL      | off (local)            |
@@ -109,20 +109,28 @@ Connect with **DBeaver**, **pgAdmin**, **HeidiSQL**, etc.:
 
 | Table             | Contents                                    |
 | ----------------- | ------------------------------------------- |
-| `users`           | Superadmin + moderator accounts             |
-| `students`        | Student records / QR codes                  |
-| `events`          | Events                                      |
-| `session_windows` | Morning / Afternoon (or custom) time ranges |
-| `attendance_logs` | IN / OUT scans (`confirmed` / `cancelled`)  |
+| `"Users"`                              | Superadmin + moderator logins    |
+| `"Students"` / `"StudentEnrollments"`  | Student QR records + roster      |
+| `"Events"` / `"EventSessions"`         | Events and session time windows  |
+| `"AttendanceRecords"`                  | Check-in / check-out per session |
+| `"AttendanceLogs"`                     | Scan audit (`CHECK_IN` / `CHECK_OUT`) |
 
 Useful query while testing scans:
 
 ```sql
 SET search_path TO ssc;
 
-SELECT id, direction, status, scanned_at, student_id, session_window_id
-FROM attendance_logs
-ORDER BY scanned_at DESC
+SELECT
+  l."attendanceLogId",
+  l."actionCode",
+  l."isCancelled",
+  l."recordedAtUtc",
+  ep."studentId",
+  ep."eventSessionId"
+FROM "AttendanceLogs" l
+JOIN "AttendanceRecords" ar ON ar."attendanceRecordId" = l."attendanceRecordId"
+JOIN "EventParticipants" ep ON ep."eventParticipantId" = ar."eventParticipantId"
+ORDER BY l."recordedAtUtc" DESC
 LIMIT 50;
 ```
 
@@ -131,7 +139,7 @@ LIMIT 50;
 ## 5. Or use `psql` (CLI)
 
 ```powershell
-& "C:\Program Files\PostgreSQL\18\bin\psql.exe" -U postgres -h localhost -d ssc_attendance
+& "C:\Program Files\PostgreSQL\18\bin\psql.exe" -U postgres -h localhost -d aclc
 ```
 
 Then:
@@ -139,8 +147,8 @@ Then:
 ```sql
 SET search_path TO ssc;
 \dt
-SELECT * FROM users;
-SELECT * FROM attendance_logs ORDER BY id DESC LIMIT 20;
+SELECT * FROM "Users";
+SELECT * FROM "AttendanceLogs" ORDER BY "attendanceLogId" DESC LIMIT 20;
 \q
 ```
 
@@ -165,7 +173,7 @@ SELECT * FROM attendance_logs ORDER BY id DESC LIMIT 20;
 | `DATABASE_URL`      | —                     | Full URL; overrides the discrete vars |
 | `DATABASE_HOST`     | `localhost`           |                                       |
 | `DATABASE_PORT`     | `5432`                |                                       |
-| `DATABASE_NAME`     | `ssc_attendance`      |                                       |
+| `DATABASE_NAME`     | `aclc`                |                                       |
 | `DATABASE_USER`     | `postgres`            |                                       |
 | `DATABASE_PASSWORD` | `postgres`            | Change to match your install          |
 | `JWT_SECRET`        | auto `jwt_secret.txt` |                                       |

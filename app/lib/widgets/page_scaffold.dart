@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../core/theme/app_theme.dart';
@@ -28,6 +29,41 @@ class AppPage extends StatelessWidget {
     );
     if (!scrollable) return body;
     return SingleChildScrollView(child: body);
+  }
+}
+
+/// On web, centers content so cards don't stretch across a wide desktop.
+/// Phone / tablet native builds stay full width.
+class AppContentWidth extends StatelessWidget {
+  const AppContentWidth({
+    super.key,
+    required this.child,
+    this.maxWidth = AppTheme.contentMaxWidth,
+  });
+
+  final Widget child;
+  final double maxWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!kIsWeb) return child;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth < maxWidth
+            ? constraints.maxWidth
+            : maxWidth;
+        return Align(
+          alignment: Alignment.topCenter,
+          child: SizedBox(
+            width: width,
+            height: constraints.maxHeight.isFinite
+                ? constraints.maxHeight
+                : null,
+            child: child,
+          ),
+        );
+      },
+    );
   }
 }
 

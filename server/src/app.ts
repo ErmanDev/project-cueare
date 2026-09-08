@@ -2,16 +2,12 @@ import type { ErrorRequestHandler, Express } from 'express';
 import express from 'express';
 
 import { AttendanceService } from './attendance/service.ts';
-import { requireAuth } from './auth/middleware.ts';
-import { getConfig, databaseDisplay } from './config.ts';
+import { getConfig } from './config.ts';
 import { getPool } from './db/pool.ts';
-import { adminRouter } from './routes/admin.ts';
-import { authRouter } from './routes/auth.ts';
-import { moderatorRouter } from './routes/moderator.ts';
-import { studentRouter } from './routes/student.ts';
+import { apiInfo, mountRestApi } from './routes/index.ts';
 import { mountSwagger } from './swagger/ui.ts';
-import { ROLES } from './types.ts';
 import { ApiError } from './utils/errors.ts';
+import { mountFlutterWeb, resolveWebDist } from './web.ts';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -46,29 +42,17 @@ export function createApp(service?: AttendanceService): Express {
     next();
   });
 
-  app.get('/', (_req, res) => {
-    const db = getConfig().database;
-    res.json({
-      name: 'SSC QR Attendance API',
-      status: 'ok',
-      server_time: new Date().toISOString(),
-      database: databaseDisplay(db),
-      docs: '/docs',
-    });
-  });
-
-  app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', server_time: new Date().toISOString() });
-  });
-
-  app.post('/auth/login', authRouter.login);
-  app.get('/auth/me', ...authRouter.me);
-
   mountSwagger(app);
+  mountRestApi(app, '/api');
+  // Unprefixed aliases so older APKs that call /auth/login still work.
+  mountRestApi(app);
 
-  app.use('/admin', requireAuth(new Set([ROLES.superadmin])), adminRouter);
-  app.use('/moderator', requireAuth(new Set([ROLES.moderator])), moderatorRouter);
-  app.use('/student', studentRouter);
+  const webDir = resolveWebDist();
+  if (webDir) {
+    mountFlutterWeb(app, webDir);
+  } else {
+    app.get('/', apiInfo);
+  }
 
   app.use((_req, res) => {
     res.status(404).json({ error: 'Not found' });

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -28,8 +27,15 @@ class ScannerScreen extends ConsumerStatefulWidget {
 
 class _ScannerScreenState extends ConsumerState<ScannerScreen>
     with WidgetsBindingObserver {
-  static bool get _cameraSupported =>
-      kIsWeb || Platform.isAndroid || Platform.isIOS || Platform.isMacOS;
+  static bool get _cameraSupported {
+    if (kIsWeb) return true;
+    return switch (defaultTargetPlatform) {
+      TargetPlatform.android ||
+      TargetPlatform.iOS ||
+      TargetPlatform.macOS => true,
+      _ => false,
+    };
+  }
 
   final MobileScannerController _controller = MobileScannerController(
     autoStart: false,
@@ -428,7 +434,9 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    'Point the camera at a student QR code',
+                    kIsWeb
+                        ? 'Allow camera in the browser, or type the student code'
+                        : 'Point the camera at a student QR code',
                     style: TextStyle(color: scheme.onSurfaceVariant),
                   ),
                   const Spacer(),
@@ -508,7 +516,7 @@ class _NoCameraFallback extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           const Text(
-            'Camera scanning is only available on Android / iOS.\n'
+            'Camera scanning is not available on this device.\n'
             'Type the student code instead.',
             textAlign: TextAlign.center,
             style: TextStyle(color: Colors.white),

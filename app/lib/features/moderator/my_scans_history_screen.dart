@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
 import '../../widgets/async_value_widget.dart';
+import '../../widgets/page_scaffold.dart';
 import 'moderator_providers.dart';
 
 /// Read-only list of the moderator's own confirmed scans today.
@@ -25,7 +26,8 @@ class MyScansHistoryScreen extends ConsumerWidget {
           ),
         ],
       ),
-      body: RefreshIndicator(
+      body: AppContentWidth(
+        child: RefreshIndicator(
         onRefresh: () => ref.refresh(myScansProvider.future),
         child: AsyncValueWidget(
           value: scans,
@@ -88,6 +90,7 @@ class MyScansHistoryScreen extends ConsumerWidget {
               },
             );
           },
+        ),
         ),
       ),
     );

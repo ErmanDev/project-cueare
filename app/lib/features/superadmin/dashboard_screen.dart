@@ -5,6 +5,7 @@ import '../../core/auth/auth_state.dart';
 import '../../core/config/server_settings.dart';
 import '../../core/theme/app_theme.dart';
 import '../../widgets/async_value_widget.dart';
+import '../../widgets/page_scaffold.dart';
 import '../../widgets/status_chip.dart';
 import '../auth/server_config_screen.dart';
 import 'attendance/attendance_screen.dart';
@@ -77,7 +78,8 @@ class SuperadminDashboardScreen extends ConsumerWidget {
           ),
         ],
       ),
-      body: ListView(
+      body: AppContentWidth(
+        child: ListView(
         padding: AppTheme.pagePadding,
         children: [
           Card(
@@ -180,6 +182,7 @@ class SuperadminDashboardScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 8),
         ],
+        ),
       ),
     );
   }

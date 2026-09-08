@@ -1,7 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 /// In-memory copy of the JWT so the API client can read it synchronously.
-/// Persistence lives in [AuthNotifier] (flutter_secure_storage).
+/// Persistence lives in [AuthNotifier] / [SessionStore].
 class AuthTokenNotifier extends Notifier<String?> {
   @override
   String? build() => null;

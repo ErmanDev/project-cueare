@@ -41,7 +41,12 @@ Open in DBeaver / pgAdmin / HeidiSQL:
 | Password | your Postgres password |
 | Schema   | `ssc`            |
 
-Tables: `users`, `students`, `events`, `session_windows`, `attendance_logs`.
+Tables: `"Users"`, academic calendar (`"AcademicYears"`,
+`"AcademicTerms"`, `"AcademicPrograms"`, `"Sections"`, `"Students"`,
+`"StudentEnrollments"`), events (`"Events"`, `"EventSessions"`, `"EventParticipants"`),
+and attendance (`"AttendanceRecords"`, `"AttendanceCorrections"`, `"AttendanceLogs"`).
+PostgreSQL identifiers are quoted: PascalCase tables, camelCase columns. REST JSON
+stays snake_case.
 
 **Laragon:** stock Laragon is MySQL. This app needs **PostgreSQL** — use the Windows
 Postgres install (already present on this machine), Docker, or a Laragon Postgres
@@ -79,7 +84,8 @@ Settings at `YOUR_IP:8080`.
 - [ ] `npm run ensure-db` + `npm run seed-admin` succeeded
 - [ ] Phone and laptop on the same Wi-Fi
 - [ ] Firewall allows 8080
-- [ ] Browser on phone: `http://YOUR_IP:8080/` returns JSON with `"status":"ok"`
+- [ ] Browser on phone or laptop: `http://YOUR_IP:8080/` opens the Flutter app
+      (Staff / Student). `http://YOUR_IP:8080/api` returns JSON `"status":"ok"`
 
 Reset admin password: `npm run seed-admin -- admin newpassword`.
 Create another superadmin: `npm run seed-admin -- erman epass123`.

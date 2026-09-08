@@ -20,7 +20,10 @@ export const openApiDocument = {
       'Authorize with a JWT from `POST /auth/login`. ' +
       '`/admin/*` is superadmin-only; `/moderator/*` is moderator-only; `/student/*` is public (LAN).',
   },
-  servers: [{ url: '/', description: 'This server' }],
+  servers: [
+    { url: '/api', description: 'REST API' },
+    { url: '/', description: 'Unprefixed aliases (same routes)' },
+  ],
   tags: [
     { name: 'Health' },
     { name: 'Auth' },
@@ -192,6 +195,7 @@ export const openApiDocument = {
                     server_time: { type: 'string', format: 'date-time' },
                     database: { type: 'string' },
                     docs: { type: 'string', example: '/docs' },
+                    api: { type: 'string', example: '/api' },
                   },
                 },
               },

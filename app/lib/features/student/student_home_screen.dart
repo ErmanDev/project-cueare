@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/auth/auth_state.dart';
+import '../../widgets/page_scaffold.dart';
 import '../auth/server_config_screen.dart';
 import 'my_attendance_screen.dart';
 import 'my_qr_screen.dart';
@@ -40,12 +41,14 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
           ),
         ],
       ),
-      body: IndexedStack(
+      body: AppContentWidth(
+        child: IndexedStack(
         index: _index,
         children: [
           MyQrScreen(studentIdCode: widget.studentIdCode),
           MyAttendanceScreen(studentIdCode: widget.studentIdCode),
         ],
+        ),
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,

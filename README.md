@@ -1,13 +1,13 @@
 # SSC QR Attendance
 
 LAN-only QR event attendance: an **Express + TypeScript + PostgreSQL** REST API (runs on a
-laptop) and a **Flutter** app (moderator phones scan student QR codes; superadmin manages
-everything; students can display their own QR). No internet or cloud required — every
+laptop) and a **Flutter** app — phones (Android/iOS APK) **or any browser** (same
+superadmin / moderator / student UI). No internet or cloud required — every
 device just joins the same Wi-Fi router.
 
 ```
-/server   Express + TypeScript REST API + PostgreSQL
-/app      Flutter app (Android / iOS; Windows build works for admin screens only)
+/server   Express + TypeScript REST API + PostgreSQL + Flutter web
+/app      Flutter app (Android / iOS / web; Windows for admin screens)
 /plan     Original build plan + backend / Postgres setup notes
 ```
 
@@ -30,7 +30,7 @@ Or set it in the shell for this session:
 
 ```powershell
 $env:DATABASE_PASSWORD = 'YOUR_POSTGRES_PASSWORD'
-# optional: $env:DATABASE_URL = 'postgres://postgres:YOUR_POSTGRES_PASSWORD@localhost:5432/ssc_attendance'
+# optional: $env:DATABASE_URL = 'postgres://postgres:YOUR_POSTGRES_PASSWORD@localhost:5432/aclc'
 ```
 
 2. Create the database + seed the admin:
@@ -47,12 +47,13 @@ npm run seed-admin     # admin / changeme123
 |----------|------------------|
 | Host     | `localhost`      |
 | Port     | `5432`           |
-| Database | `ssc_attendance` |
+| Database | `aclc` |
 | User     | `postgres`       |
 | Password | *(your password)* |
 
-Tables appear after the first server start / seed (`users`, `students`, `events`,
-`session_windows`, `attendance_logs`).
+Tables appear after the first server start / seed in schema `ssc` (`"Users"`,
+`"Students"`, `"Events"`, `"EventSessions"`, `"AttendanceRecords"`,
+`"AttendanceLogs"`, and related academic / enrollment tables).
 
 > **Laragon note:** stock Laragon ships **MySQL**, not Postgres. Use Postgres via the
 > Windows installer (you already have it), Docker, or a Laragon Postgres addon — then
@@ -63,6 +64,7 @@ Tables appear after the first server start / seed (`users`, `students`, `events`
 ```powershell
 cd server
 npm install
+npm run build:web        # Flutter web UI (once, or after app changes)
 npm run dev              # tsx watch, port 8080 (or PORT env)
 ```
 
@@ -76,30 +78,45 @@ Then:
 
 1. `ipconfig` → note the Wi-Fi adapter's **IPv4 address** (e.g. `192.168.1.10`).
 2. Allow inbound TCP **8080** in Windows Firewall (Advanced settings → Inbound Rules → New Rule → Port).
-3. From a phone browser open `http://192.168.1.10:8080/` — you should see `{"status":"ok", "database":"postgres@localhost:5432/ssc_attendance", ...}`.
-   Swagger UI (laptop browser): `http://localhost:8080/docs`.
+3. Open **`http://192.168.1.10:8080/`** on a laptop or phone browser — that is the
+   Flutter app (Staff login or Student code). REST JSON is at `/api`.
+   Swagger UI (laptop): `http://localhost:8080/docs`.
+
+If you skip `npm run build:web`, `/` still returns API JSON and phones must use the APK.
 
 Runtime file (git-ignored): `jwt_secret.txt` (auto-generated; delete it to invalidate all logins).
 
 Optional env vars: `DATABASE_URL` (or `DATABASE_HOST` / `PORT` / `NAME` / `USER` / `PASSWORD`),
-`JWT_SECRET`, `JWT_TTL_HOURS` (default 12), `QR_HMAC_SECRET`.
+`JWT_SECRET`, `JWT_TTL_HOURS` (default 12), `QR_HMAC_SECRET`, `WEB_DIST` (override Flutter web folder).
 
 Reset the admin password: `npm run seed-admin -- admin newpassword`.
 
 Tests: `npm test` (unit tests always; attendance engine tests need Postgres).
 
-## 2. Run the app (phones)
+## 3. Run the app (phones or Chrome)
+
+**Browser (recommended for superadmin on the laptop, and for students):** after
+`npm run build:web` and `npm start`, open `http://YOUR_LAN_IP:8080/` — same
+origin, no server-address screen.
+
+**APK / `flutter run` (phones):**
 
 ```powershell
 cd app
 flutter pub get
-flutter run            # or: flutter build apk --release  →  build/app/outputs/flutter-apk/app-release.apk
+flutter run            # or: flutter build apk --release
+flutter run -d chrome  # Flutter web against the API at localhost:8080
 ```
 
-First launch asks for the **server address** (`192.168.1.10:8080`) — use *Test connection*
-then *Save*. It can be changed later from the ⚙ icon on any screen.
+First launch on a native build asks for the **server address** (`192.168.1.10:8080`) —
+use *Test connection* then *Save*. It can be changed later from the ethernet icon
+on any screen.
 
-## 3. Workflow
+Camera scanning in a **phone/laptop browser over `http://192.168.x.x`** may be
+blocked (browsers require HTTPS except on localhost). Moderators can still type
+the student code, or use the Android APK for the camera.
+
+## 4. Workflow
 
 | Role | Login | What they do |
 |---|---|---|
@@ -120,30 +137,34 @@ Setup order: **event with session windows → students → moderators → scan.*
   student at once can't both record IN.
 * Outside every window in Auto mode, the moderator is asked to pick a session (or block).
 
-## 4. API summary
+## 5. API summary
+
+Canonical REST prefix is **`/api`**. The same paths also work without `/api`
+(for older app builds).
 
 ```
-POST /auth/login  {username,password} → {token, role, user}
-GET  /auth/me
-GET|POST        /admin/moderators          PUT|DELETE /admin/moderators/:id
-GET|POST        /admin/students            PUT|DELETE /admin/students/:id     POST /admin/students/import
-GET|POST        /admin/events              GET|PUT|DELETE /admin/events/:id
-GET|POST        /admin/events/:id/session-windows        PUT|DELETE /admin/session-windows/:id
-GET             /admin/attendance?event_id=&date=&student_id=&session_window_id=&status=&q=
-PUT|DELETE      /admin/attendance/:id      GET /admin/attendance/export (CSV)
-GET  /moderator/events/active
-GET  /moderator/session-windows?event_id=&mode=auto|manual&override=Morning
-POST /moderator/scan/preview  {event_id, student_id_code, session_window_id?}
-POST /moderator/scan/confirm  {event_id, student_id, session_window_id, direction?}
-POST /moderator/scan/cancel   {event_id, student_id, session_window_id}
-GET  /moderator/scans/mine?event_id=&date=all&status=all
-GET  /student/:code/qr        GET /student/:code/attendance
+GET  /api  /api/health
+POST /api/auth/login  {username,password} → {token, role, user}
+GET  /api/auth/me
+GET|POST        /api/admin/moderators          PUT|DELETE /api/admin/moderators/:id
+GET|POST        /api/admin/students            PUT|DELETE /api/admin/students/:id     POST /api/admin/students/import
+GET|POST        /api/admin/events              GET|PUT|DELETE /api/admin/events/:id
+GET|POST        /api/admin/events/:id/session-windows        PUT|DELETE /api/admin/session-windows/:id
+GET             /api/admin/attendance?event_id=&date=&student_id=&session_window_id=&status=&q=
+PUT|DELETE      /api/admin/attendance/:id      GET /api/admin/attendance/export (CSV)
+GET  /api/moderator/events/active
+GET  /api/moderator/session-windows?event_id=&mode=auto|manual&override=Morning
+POST /api/moderator/scan/preview  {event_id, student_id_code, session_window_id?}
+POST /api/moderator/scan/confirm  {event_id, student_id, session_window_id, direction?}
+POST /api/moderator/scan/cancel   {event_id, student_id, session_window_id}
+GET  /api/moderator/scans/mine?event_id=&date=all&status=all
+GET  /api/student/:code/qr        GET /api/student/:code/attendance
 ```
 
-`/admin/*` requires a superadmin JWT, `/moderator/*` a moderator JWT
-(`Authorization: Bearer <token>`); `/student/*` is unauthenticated (LAN only, read-only).
+`/api/admin/*` requires a superadmin JWT, `/api/moderator/*` a moderator JWT
+(`Authorization: Bearer <token>`); `/api/student/*` is unauthenticated (LAN only, read-only).
 
-## 5. Troubleshooting
+## 6. Troubleshooting
 
 * **Phone can't connect** — same Wi-Fi (not guest network / mobile data)? Server running?
   Firewall rule for 8080? IP still the same (set a DHCP reservation for the laptop)?

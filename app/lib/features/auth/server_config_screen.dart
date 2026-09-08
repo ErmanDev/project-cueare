@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -28,7 +29,8 @@ class _ServerConfigScreenState extends ConsumerState<ServerConfigScreen> {
   void initState() {
     super.initState();
     final current = ref.read(serverSettingsProvider).value;
-    _controller.text = current?.display ?? '';
+    _controller.text = current?.display ??
+        (kIsWeb ? ServerSettings.sameOrigin?.display ?? 'localhost:8080' : '');
   }
 
   @override
@@ -116,8 +118,12 @@ class _ServerConfigScreenState extends ConsumerState<ServerConfigScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Enter the LAN IP address and port of the laptop running the '
-                  'server. Everyone must be on the same Wi-Fi network.',
+                  kIsWeb
+                      ? 'If you opened this from the attendance server URL, it '
+                            'should already be connected. Otherwise enter the '
+                            'laptop LAN address (same Wi-Fi).'
+                      : 'Enter the LAN IP address and port of the laptop running the '
+                            'server. Everyone must be on the same Wi-Fi network.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: scheme.onSurfaceVariant),
                 ),
