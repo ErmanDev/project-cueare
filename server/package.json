@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "bun --watch src/index.ts",
     "start": "bun src/index.ts",
+    "start:admin": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/start-admin.ps1",
     "build:web": "bun scripts/build-web.ts",
     "ensure-db": "bun scripts/ensure-database.ts",
     "seed-admin": "bun scripts/seed-admin.ts",
