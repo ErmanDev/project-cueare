@@ -4,10 +4,12 @@ import express from 'express';
 import { AttendanceService } from './attendance/service.ts';
 import { getConfig } from './config.ts';
 import { getPool } from './db/pool.ts';
+import { createHttpGuards, type ServerRuntime } from './infra/httpGuards.ts';
+import { ScanWriteQueue } from './infra/queue.ts';
 import { apiInfo, mountRestApi } from './routes/index.ts';
 import { mountSwagger } from './swagger/ui.ts';
 import { ApiError } from './utils/errors.ts';
-import { mountFlutterWeb, resolveWebDist } from './web.ts';
+import { mountWebApp, resolveWebDist } from './web.ts';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -17,10 +19,23 @@ const CORS_HEADERS = {
 
 export function createApp(service?: AttendanceService): Express {
   const app = express();
+  const config = getConfig();
+  const runtime: ServerRuntime = {
+    rateLimitEnabled: config.rateLimit.enabled,
+    guards: createHttpGuards(config.rateLimit),
+  };
   const attendance =
     service ??
-    new AttendanceService(getPool(), { qrHmacSecret: getConfig().qrHmacSecret });
+    new AttendanceService(getPool(), {
+      qrHmacSecret: config.qrHmacSecret,
+      runtime: config.runtime,
+      writeQueue: new ScanWriteQueue({ concurrency: config.runtime.scanConcurrency }),
+    });
   app.locals.attendance = attendance;
+  app.locals.runtime = runtime;
+  if (config.trustProxy) {
+    app.set('trust proxy', 1);
+  }
 
   app.use((req, res, next) => {
     for (const [k, v] of Object.entries(CORS_HEADERS)) res.setHeader(k, v);
@@ -49,7 +64,7 @@ export function createApp(service?: AttendanceService): Express {
 
   const webDir = resolveWebDist();
   if (webDir) {
-    mountFlutterWeb(app, webDir);
+    mountWebApp(app, webDir);
   } else {
     app.get('/', apiInfo);
   }
@@ -64,6 +79,10 @@ export function createApp(service?: AttendanceService): Express {
       return;
     }
     if (err instanceof ApiError) {
+      const retry = err.details?.retry_after_seconds;
+      if (err.statusCode === 429 && typeof retry === 'number') {
+        res.setHeader('Retry-After', String(retry));
+      }
       res.status(err.statusCode).json(err.toBody());
       return;
     }

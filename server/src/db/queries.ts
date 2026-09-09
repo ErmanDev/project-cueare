@@ -1,4 +1,5 @@
 import type { AttendanceDetailRow } from '../utils/serialize.ts';
+import { conflict, isPgUniqueViolation } from '../utils/errors.ts';
 import { parseMinutes, startOfDay } from '../utils/time.ts';
 import { escapeLike } from '../utils/studentCode.ts';
 import { q } from './ident.ts';
@@ -355,11 +356,11 @@ export async function countScansByModerator(db: Queryable, userId: number): Prom
   return Number(row?.n ?? 0);
 }
 
-export async function listStudents(db: Queryable, q?: string | null): Promise<StudentRow[]> {
-  if (!q) {
+export async function listStudents(db: Queryable, search?: string | null): Promise<StudentRow[]> {
+  if (!search) {
     return many<StudentRow>(db, `${STUDENT_SELECT} ORDER BY full_name ASC`);
   }
-  const like = `%${escapeLike(q.toLowerCase())}%`;
+  const like = `%${escapeLike(search.toLowerCase())}%`;
   return many<StudentRow>(
     db,
     `${STUDENT_SELECT}
@@ -377,6 +378,30 @@ export async function getStudentById(db: Queryable, id: number): Promise<Student
 
 export async function getStudentByCode(db: Queryable, code: string): Promise<StudentRow | null> {
   return one<StudentRow>(db, `${STUDENT_SELECT} WHERE s.${q('studentNumber')} = $1`, [code]);
+}
+
+export async function getStudentsByCodes(
+  db: Queryable,
+  codes: string[],
+): Promise<StudentRow[]> {
+  if (codes.length === 0) return [];
+  return many<StudentRow>(
+    db,
+    `${STUDENT_SELECT} WHERE s.${q('studentNumber')} = ANY($1::text[])`,
+    [codes],
+  );
+}
+
+/** Transaction-scoped lock for one student in one session (blocks other writers). */
+export async function lockStudentSession(
+  db: Queryable,
+  studentId: number,
+  sessionWindowId: number,
+): Promise<void> {
+  await db.query('SELECT pg_advisory_xact_lock($1::int, $2::int)', [
+    studentId,
+    sessionWindowId,
+  ]);
 }
 
 async function findOrCreateSection(
@@ -860,6 +885,7 @@ async function ensureScanTarget(
           ${q('eventSessionId')}, ${q('academicTermId')}, ${q('studentEnrollmentId')},
           ${q('studentId')}, ${q('addedByUserId')}
        ) VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (${q('eventSessionId')}, ${q('studentId')}) DO NOTHING
        RETURNING ${q('eventParticipantId')} AS event_participant_id`,
       [
         args.sessionWindowId,
@@ -869,11 +895,20 @@ async function ensureScanTarget(
         args.actorUserId,
       ],
     );
+    if (!participant) {
+      participant = await one<{ event_participant_id: number }>(
+        db,
+        `SELECT ${q('eventParticipantId')} AS event_participant_id FROM ${q('EventParticipants')}
+         WHERE ${q('eventSessionId')} = $1 AND ${q('studentId')} = $2`,
+        [args.sessionWindowId, args.studentId],
+      );
+    }
   }
   let record = await one<{ attendance_record_id: number }>(
     db,
     `SELECT ${q('attendanceRecordId')} AS attendance_record_id FROM ${q('AttendanceRecords')}
-     WHERE ${q('eventParticipantId')} = $1`,
+     WHERE ${q('eventParticipantId')} = $1
+     FOR UPDATE`,
     [participant!.event_participant_id],
   );
   if (!record) {
@@ -882,9 +917,19 @@ async function ensureScanTarget(
       `INSERT INTO ${q('AttendanceRecords')} (
           ${q('eventParticipantId')}, ${q('lastChangedByUserId')}
        ) VALUES ($1, $2)
+       ON CONFLICT (${q('eventParticipantId')}) DO NOTHING
        RETURNING ${q('attendanceRecordId')} AS attendance_record_id`,
       [participant!.event_participant_id, args.actorUserId],
     );
+    if (!record) {
+      record = await one<{ attendance_record_id: number }>(
+        db,
+        `SELECT ${q('attendanceRecordId')} AS attendance_record_id FROM ${q('AttendanceRecords')}
+         WHERE ${q('eventParticipantId')} = $1
+         FOR UPDATE`,
+        [participant!.event_participant_id],
+      );
+    }
   }
   return { recordId: record!.attendance_record_id };
 }
@@ -959,29 +1004,37 @@ export async function insertAttendance(
     );
   }
 
-  const created = await one<{ attendance_log_id: number }>(
-    db,
-    `INSERT INTO ${q('AttendanceLogs')} (
-        ${q('attendanceRecordId')}, ${q('actionCode')},
-        ${q('oldCheckInAtUtc')}, ${q('oldCheckOutAtUtc')},
-        ${q('newCheckInAtUtc')}, ${q('newCheckOutAtUtc')},
-        ${q('oldIsExcused')}, ${q('newIsExcused')},
-        ${q('actorUserId')}, ${q('recordedAtUtc')}, ${q('deviceNote')}, ${q('isCancelled')}
-     ) VALUES ($1,$2,$3,$4,$5,$6,false,false,$7,$8,$9,$10)
-     RETURNING ${q('attendanceLogId')} AS attendance_log_id`,
-    [
-      recordId,
-      action,
-      previous.checked_in_at_utc,
-      previous.checked_out_at_utc,
-      cancelled ? previous.checked_in_at_utc : newIn,
-      cancelled ? previous.checked_out_at_utc : newOut,
-      row.scannedBy,
-      row.scannedAt,
-      row.deviceNote,
-      cancelled,
-    ],
-  );
+  let created: { attendance_log_id: number } | null;
+  try {
+    created = await one<{ attendance_log_id: number }>(
+      db,
+      `INSERT INTO ${q('AttendanceLogs')} (
+          ${q('attendanceRecordId')}, ${q('actionCode')},
+          ${q('oldCheckInAtUtc')}, ${q('oldCheckOutAtUtc')},
+          ${q('newCheckInAtUtc')}, ${q('newCheckOutAtUtc')},
+          ${q('oldIsExcused')}, ${q('newIsExcused')},
+          ${q('actorUserId')}, ${q('recordedAtUtc')}, ${q('deviceNote')}, ${q('isCancelled')}
+       ) VALUES ($1,$2,$3,$4,$5,$6,false,false,$7,$8,$9,$10)
+       RETURNING ${q('attendanceLogId')} AS attendance_log_id`,
+      [
+        recordId,
+        action,
+        previous.checked_in_at_utc,
+        previous.checked_out_at_utc,
+        cancelled ? previous.checked_in_at_utc : newIn,
+        cancelled ? previous.checked_out_at_utc : newOut,
+        row.scannedBy,
+        row.scannedAt,
+        row.deviceNote,
+        cancelled,
+      ],
+    );
+  } catch (e) {
+    if (!cancelled && isPgUniqueViolation(e)) {
+      throw conflict('Already recorded for this session', { code: 'ALREADY_COMPLETE' });
+    }
+    throw e;
+  }
   return (await getAttendanceById(db, created!.attendance_log_id))!;
 }
 

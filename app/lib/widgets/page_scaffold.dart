@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../core/theme/app_theme.dart';
@@ -32,8 +31,8 @@ class AppPage extends StatelessWidget {
   }
 }
 
-/// On web, centers content so cards don't stretch across a wide desktop.
-/// Phone / tablet native builds stay full width.
+/// Caps content width on wide screens (Windows) so cards don't stretch.
+/// Phone / tablet layouts stay full width.
 class AppContentWidth extends StatelessWidget {
   const AppContentWidth({
     super.key,
@@ -46,7 +45,6 @@ class AppContentWidth extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!kIsWeb) return child;
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth < maxWidth

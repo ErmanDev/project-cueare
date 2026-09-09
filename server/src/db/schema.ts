@@ -389,6 +389,12 @@ export function schemaStatements(schema = 'ssc'): string[] {
       ON ${q('AttendanceLogs')} (${q('attendanceRecordId')}, ${q('attendanceLogId')})`,
     `CREATE INDEX IF NOT EXISTS ix_attendance_logs_lookup
       ON ${q('AttendanceLogs')} (${q('recordedAtUtc')})`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS ux_attendance_logs_one_checkin
+      ON ${q('AttendanceLogs')} (${q('attendanceRecordId')})
+      WHERE ${q('actionCode')} = 'CHECK_IN' AND ${q('isCancelled')} = false`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS ux_attendance_logs_one_checkout
+      ON ${q('AttendanceLogs')} (${q('attendanceRecordId')})
+      WHERE ${q('actionCode')} = 'CHECK_OUT' AND ${q('isCancelled')} = false`,
     `CREATE OR REPLACE VIEW ${q('AttendanceSessionStatus')} AS
      SELECT
        r.${q('attendanceRecordId')},
@@ -840,6 +846,18 @@ export async function addMissingConstraints(db: Queryable): Promise<void> {
     db,
     `ALTER TABLE ${q('AttendanceLogs')} ADD CONSTRAINT fk_attendance_logs_actor
      FOREIGN KEY (${q('actorUserId')}) REFERENCES ${q('Users')} (${q('userId')})`,
+  );
+  await ignoreDuplicate(
+    db,
+    `CREATE UNIQUE INDEX IF NOT EXISTS ux_attendance_logs_one_checkin
+     ON ${q('AttendanceLogs')} (${q('attendanceRecordId')})
+     WHERE ${q('actionCode')} = 'CHECK_IN' AND ${q('isCancelled')} = false`,
+  );
+  await ignoreDuplicate(
+    db,
+    `CREATE UNIQUE INDEX IF NOT EXISTS ux_attendance_logs_one_checkout
+     ON ${q('AttendanceLogs')} (${q('attendanceRecordId')})
+     WHERE ${q('actionCode')} = 'CHECK_OUT' AND ${q('isCancelled')} = false`,
   );
 }
 

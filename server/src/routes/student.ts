@@ -20,7 +20,7 @@ studentRouter.get(
   '/:code/qr',
   asyncHandler(async (req, res) => {
     const safeCode = requireValidStudentCode(req.params.code);
-    const student = await q.getStudentByCode(getPool(), safeCode);
+    const student = await service(req).catalog.getStudentByCode(safeCode);
     if (!student) throw notFound(`No student found for code "${safeCode}"`);
     res.json({
       student: studentToApi(student),
@@ -33,7 +33,7 @@ studentRouter.get(
   '/:code/attendance',
   asyncHandler(async (req, res) => {
     const safeCode = requireValidStudentCode(req.params.code);
-    const student = await q.getStudentByCode(getPool(), safeCode);
+    const student = await service(req).catalog.getStudentByCode(safeCode);
     if (!student) throw notFound(`No student found for code "${safeCode}"`);
     const rows = await q.listAttendance(getPool(), {
       studentId: student.id,

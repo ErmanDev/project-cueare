@@ -45,3 +45,19 @@ export function conflict(
 ): ApiError {
   return new ApiError(409, message, details);
 }
+
+export function tooManyRequests(retryAfterSeconds: number): ApiError {
+  return new ApiError(429, 'Too many requests', {
+    code: 'RATE_LIMITED',
+    retry_after_seconds: retryAfterSeconds,
+  });
+}
+
+export function isPgUniqueViolation(err: unknown): boolean {
+  return Boolean(
+    err &&
+      typeof err === 'object' &&
+      'code' in err &&
+      (err as { code: unknown }).code === '23505',
+  );
+}

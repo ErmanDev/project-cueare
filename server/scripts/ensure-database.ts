@@ -46,7 +46,7 @@ async function main(): Promise<void> {
   console.log(`  User:     ${cfg.user}`);
   console.log('  Password: (your DATABASE_PASSWORD / postgres user password)');
   console.log('');
-  console.log('Next: npm run seed-admin');
+  console.log('Next: bun run seed-admin');
 }
 
 main().catch((err) => {

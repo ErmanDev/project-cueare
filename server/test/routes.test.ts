@@ -1,5 +1,5 @@
 import type { AddressInfo } from 'node:net';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 
 import { createApp } from '../src/app.ts';
 import type { AttendanceService } from '../src/attendance/service.ts';

@@ -16,12 +16,34 @@ export type DatabaseConfig = {
   password: string;
 };
 
+export type RuntimeTuning = {
+  cacheTtlMs: number;
+  eventTtlMs: number;
+  cacheMaxEntries: number;
+  batchWindowMs: number;
+  batchMax: number;
+  scanConcurrency: number;
+};
+
+export type RateLimitTuning = {
+  enabled: boolean;
+  loginMax: number;
+  loginWindowMs: number;
+  scanPreviewMax: number;
+  scanWriteMax: number;
+  scanWindowMs: number;
+};
+
 export type AppConfig = {
   port: number;
+  listenHost: string;
+  trustProxy: boolean;
   database: DatabaseConfig;
   jwtSecret: string;
   jwtTtlHours: number;
   qrHmacSecret: string | null;
+  runtime: RuntimeTuning;
+  rateLimit: RateLimitTuning;
 };
 
 function loadOrCreateJwtSecret(env: NodeJS.ProcessEnv): string {
@@ -66,14 +88,58 @@ function databaseFromEnv(env: NodeJS.ProcessEnv): DatabaseConfig {
   };
 }
 
+function envInt(env: NodeJS.ProcessEnv, key: string, fallback: number): number {
+  const raw = env[key];
+  if (raw == null || raw.trim() === '') return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function envFlag(env: NodeJS.ProcessEnv, key: string, fallback: boolean): boolean {
+  const raw = env[key]?.trim().toLowerCase();
+  if (!raw) return fallback;
+  if (['1', 'true', 'yes', 'on'].includes(raw)) return true;
+  if (['0', 'false', 'no', 'off'].includes(raw)) return false;
+  return fallback;
+}
+
+export function defaultRuntimeTuning(): RuntimeTuning {
+  return {
+    cacheTtlMs: 30_000,
+    eventTtlMs: 15_000,
+    cacheMaxEntries: 5_000,
+    batchWindowMs: 8,
+    batchMax: 50,
+    scanConcurrency: 8,
+  };
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const qr = env.QR_HMAC_SECRET?.trim();
   return {
-    port: Number(env.PORT || 8080) || 8080,
+    port: Number(env.PORT || env.HTTP_PLATFORM_PORT || 8080) || 8080,
+    listenHost: env.LISTEN_HOST?.trim() || '127.0.0.1',
+    trustProxy: envFlag(env, 'TRUST_PROXY', true),
     database: databaseFromEnv(env),
     jwtSecret: loadOrCreateJwtSecret(env),
     jwtTtlHours: Number(env.JWT_TTL_HOURS || 12) || 12,
     qrHmacSecret: qr ? qr : null,
+    runtime: {
+      cacheTtlMs: envInt(env, 'SCAN_CACHE_TTL_MS', 30_000),
+      eventTtlMs: envInt(env, 'EVENT_CACHE_TTL_MS', 15_000),
+      cacheMaxEntries: envInt(env, 'SCAN_CACHE_MAX', 5_000),
+      batchWindowMs: envInt(env, 'SCAN_BATCH_WINDOW_MS', 8),
+      batchMax: envInt(env, 'SCAN_BATCH_MAX', 50),
+      scanConcurrency: envInt(env, 'SCAN_WRITE_CONCURRENCY', 8),
+    },
+    rateLimit: {
+      enabled: envFlag(env, 'RATE_LIMIT_ENABLED', true),
+      loginMax: envInt(env, 'RATE_LIMIT_LOGIN_MAX', 10),
+      loginWindowMs: envInt(env, 'RATE_LIMIT_LOGIN_WINDOW_MS', 300_000),
+      scanPreviewMax: envInt(env, 'RATE_LIMIT_SCAN_PREVIEW_MAX', 40),
+      scanWriteMax: envInt(env, 'RATE_LIMIT_SCAN_WRITE_MAX', 20),
+      scanWindowMs: envInt(env, 'RATE_LIMIT_SCAN_WINDOW_MS', 10_000),
+    },
   };
 }
 

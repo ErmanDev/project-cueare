@@ -49,15 +49,15 @@ The server loads `.env` automatically (process env vars still override it).
 
 ```powershell
 cd server
-npm install
-npm run ensure-db            # CREATE DATABASE aclc if missing
-npm run seed-admin           # creates admin / changeme123
+bun install
+bun run ensure-db            # CREATE DATABASE aclc if missing
+bun run seed-admin           # creates admin / changeme123
 ```
 
 Reset password later:
 
 ```powershell
-npm run seed-admin -- admin newpassword
+bun run seed-admin -- admin newpassword
 ```
 
 ---
@@ -65,13 +65,13 @@ npm run seed-admin -- admin newpassword
 ## 3. Start the API
 
 ```powershell
-npm run dev
+bun run dev
 ```
 
 Or without the watcher:
 
 ```powershell
-npm start
+bun start
 ```
 
 Check health in a browser:
@@ -158,11 +158,10 @@ SELECT * FROM "AttendanceLogs" ORDER BY "attendanceLogId" DESC LIMIT 20;
 
 ## 6. Flutter app (phones)
 
-1. Keep the server running.
-2. `ipconfig` → copy your Wi-Fi **IPv4**.
-3. Allow Windows Firewall inbound TCP **8080**.
-4. In the app: Server Settings → `YOUR_IP:8080` → Test → Save.
-5. Login: `admin` / `changeme123`.
+1. Keep Bun running on `127.0.0.1:8080` and publish it with IIS
+   (see [`IIS_SETUP.md`](IIS_SETUP.md)).
+2. In the app: Server Settings → IIS host name (`attendance.yourschool.edu`) → Test → Save.
+3. Login: `admin` / `changeme123`.
 
 ---
 
@@ -187,18 +186,18 @@ SELECT * FROM "AttendanceLogs" ORDER BY "attendanceLogId" DESC LIMIT 20;
 | Problem                                    | Fix                                                                                             |
 | ------------------------------------------ | ----------------------------------------------------------------------------------------------- |
 | `password authentication failed`           | Wrong `DATABASE_PASSWORD` / `DATABASE_URL` — match the password you set for the `postgres` user |
-| `database "aclc" does not exist` | Run `npm run ensure-db` |
+| `database "aclc" does not exist` | Run `bun run ensure-db` |
 | GUI can't connect                          | Confirm service `postgresql-x64-18` is Running; host `localhost`, port `5432`; schema `ssc` |
-| Phone can't reach API                      | Same Wi-Fi, firewall allows 8080, correct LAN IP in app settings                                |
+| Phone can't reach API                      | IIS site started, DNS host name, firewall 80/443, app uses that host name — see IIS_SETUP.md     |
 | Old `attendance.db` file                   | Unused after Postgres migration — safe to delete                                                |
 
-Unit tests: `npm test`. Attendance engine tests need a reachable Postgres.
+Unit tests: `bun test`. Attendance engine tests need a reachable Postgres.
 
 ## add superadmin
 
 1. Change the admin password — default is admin / changeme123. Re-run:
 
 ```powershell
-npm run seed-admin -- youruser yourpassword
-npm run seed-admin -- erman epass
+bun run seed-admin -- youruser yourpassword
+bun run seed-admin -- erman epass
 ```

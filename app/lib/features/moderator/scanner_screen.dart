@@ -28,7 +28,6 @@ class ScannerScreen extends ConsumerStatefulWidget {
 class _ScannerScreenState extends ConsumerState<ScannerScreen>
     with WidgetsBindingObserver {
   static bool get _cameraSupported {
-    if (kIsWeb) return true;
     return switch (defaultTargetPlatform) {
       TargetPlatform.android ||
       TargetPlatform.iOS ||
@@ -434,9 +433,7 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    kIsWeb
-                        ? 'Allow camera in the browser, or type the student code'
-                        : 'Point the camera at a student QR code',
+                    'Point the camera at a student QR code',
                     style: TextStyle(color: scheme.onSurfaceVariant),
                   ),
                   const Spacer(),

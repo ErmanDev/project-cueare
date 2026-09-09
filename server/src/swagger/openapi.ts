@@ -16,9 +16,10 @@ export const openApiDocument = {
     title: 'SSC QR Attendance API',
     version: '1.0.0',
     description:
-      'LAN-only REST API for QR event attendance. ' +
+      'REST API for QR event attendance, published through IIS. ' +
       'Authorize with a JWT from `POST /auth/login`. ' +
-      '`/admin/*` is superadmin-only; `/moderator/*` is moderator-only; `/student/*` is public (LAN).',
+      '`/admin/*` is superadmin-only; `/moderator/*` is moderator-only; `/student/*` is public. ' +
+      'Login and scan routes are rate-limited in-process (429 + Retry-After).',
   },
   servers: [
     { url: '/api', description: 'REST API' },
@@ -245,6 +246,10 @@ export const openApiDocument = {
           },
           '401': {
             description: 'Invalid credentials',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+          '429': {
+            description: 'RATE_LIMITED — too many login attempts',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
           },
         },
@@ -1014,6 +1019,10 @@ export const openApiDocument = {
             description: 'NO_ACTIVE_WINDOW',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
           },
+          '429': {
+            description: 'RATE_LIMITED',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
         },
       },
     },
@@ -1055,6 +1064,10 @@ export const openApiDocument = {
             description: 'ALREADY_COMPLETE or DIRECTION_CHANGED',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
           },
+          '429': {
+            description: 'RATE_LIMITED',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
         },
       },
     },
@@ -1087,6 +1100,10 @@ export const openApiDocument = {
             content: {
               'application/json': { schema: { $ref: '#/components/schemas/AttendanceLog' } },
             },
+          },
+          '429': {
+            description: 'RATE_LIMITED',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
           },
         },
       },

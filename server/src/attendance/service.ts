@@ -1,8 +1,11 @@
 import crypto from 'node:crypto';
 import type { Pool } from 'pg';
 
+import { AttendanceCatalog } from './catalog.ts';
+import { defaultRuntimeTuning, type RuntimeTuning } from '../config.ts';
 import { withTransaction } from '../db/pool.ts';
 import * as q from '../db/queries.ts';
+import { ScanWriteQueue } from '../infra/queue.ts';
 import { DIRECTION, SCAN_STATUS, type Queryable, type SessionWindowRow } from '../types.ts';
 import { ApiError, badRequest, conflict, notFound } from '../utils/errors.ts';
 import {
@@ -37,13 +40,23 @@ export type ScanPreview = {
 const MAX_DEVICE_NOTE = 200;
 
 export class AttendanceService {
+  readonly catalog: AttendanceCatalog;
+  private readonly writes: ScanWriteQueue;
+
   constructor(
     private readonly pool: Pool,
     private readonly opts: {
       clock?: () => Date;
       qrHmacSecret?: string | null;
+      catalog?: AttendanceCatalog;
+      writeQueue?: ScanWriteQueue;
+      runtime?: RuntimeTuning;
     } = {},
-  ) {}
+  ) {
+    const tuning = opts.runtime ?? { ...defaultRuntimeTuning(), batchWindowMs: 0 };
+    this.catalog = opts.catalog ?? new AttendanceCatalog(pool, tuning);
+    this.writes = opts.writeQueue ?? new ScanWriteQueue();
+  }
 
   now(): Date {
     return this.opts.clock ? this.opts.clock() : new Date();
@@ -100,7 +113,24 @@ export class AttendanceService {
   }
 
   async windowsForEvent(eventId: number, db: Queryable = this.pool): Promise<SessionWindowRow[]> {
-    return q.windowsForEvent(db, eventId);
+    if (db !== this.pool) return q.windowsForEvent(db, eventId);
+    return this.catalog.windowsForEvent(eventId);
+  }
+
+  invalidateStudent(student: { id: number; student_id_code: string }): void {
+    this.catalog.invalidateStudent(student);
+  }
+
+  invalidateAllStudents(): void {
+    this.catalog.invalidateAllStudents();
+  }
+
+  invalidateEvent(eventId?: number): void {
+    this.catalog.invalidateEvent(eventId);
+  }
+
+  rememberStudent(student: StudentRow): void {
+    this.catalog.rememberStudent(student);
   }
 
   async autoDetectWindow(eventId: number, at?: Date): Promise<SessionWindowRow | null> {
@@ -115,7 +145,10 @@ export class AttendanceService {
   }): Promise<{ window: SessionWindowRow; mode: 'auto' | 'manual' }> {
     const db = args.db ?? this.pool;
     if (args.overrideWindowId != null) {
-      const w = await q.getWindowById(db, args.overrideWindowId);
+      const w =
+        db === this.pool
+          ? await this.catalog.getWindowById(args.overrideWindowId)
+          : await q.getWindowById(db, args.overrideWindowId);
       if (!w || w.event_id !== args.eventId) {
         throw notFound('Session window not found for this event');
       }
@@ -226,6 +259,7 @@ export class AttendanceService {
     if (isPastDate(event.event_date, this.now())) {
       if (event.is_active) {
         await q.deactivateEvent(db, event.id);
+        this.catalog.invalidateEvent(event.id);
       }
       throw conflict(`Event "${event.name}" date has passed and is no longer valid`, {
         code: 'EVENT_DATE_PASSED',
@@ -240,13 +274,15 @@ export class AttendanceService {
   }
 
   async deactivateExpiredEvents(db: Queryable = this.pool): Promise<number> {
-    const active = await q.listActiveEvents(db);
+    const active =
+      db === this.pool ? await this.catalog.listActiveEvents() : await q.listActiveEvents(db);
     let count = 0;
     for (const event of active) {
       if (!isPastDate(event.event_date, this.now())) continue;
       await q.deactivateEvent(db, event.id);
       count++;
     }
+    if (count > 0) this.catalog.invalidateEvent();
     return count;
   }
 
@@ -255,11 +291,11 @@ export class AttendanceService {
     qrPayload: string;
     sessionWindowId?: number | null;
   }): Promise<ScanPreview> {
-    const event = await q.getEventById(this.pool, args.eventId);
+    const event = await this.catalog.getEventById(args.eventId);
     if (!event) throw notFound('Event not found');
     await this.ensureEventUsable(event);
     const code = this.studentCodeFromPayload(args.qrPayload);
-    const student = await q.getStudentByCode(this.pool, code);
+    const student = await this.catalog.getStudentByCode(code);
     if (!student) throw notFound(`No student found for code "${code}"`);
     const { window, mode } = await this.resolveWindow({
       eventId: args.eventId,
@@ -291,48 +327,51 @@ export class AttendanceService {
     deviceNote?: string | null;
   }): Promise<AttendanceLogRow> {
     const note = sanitizeDeviceNote(args.deviceNote);
-    return withTransaction(this.pool, async (client) => {
-      const event = await q.getEventById(client, args.eventId);
-      if (!event) throw notFound('Event not found');
-      await this.ensureEventUsable(event, client);
-      const window = await q.getWindowById(client, args.sessionWindowId);
-      if (!window || window.event_id !== args.eventId) {
-        throw notFound('Session window not found for this event');
-      }
-      this.ensureSessionAcceptingScans({ event, window });
-      const student = await q.getStudentById(client, args.studentId);
-      if (!student) throw notFound('Student not found');
+    return this.writes.run(args.studentId, args.sessionWindowId, () =>
+      withTransaction(this.pool, async (client) => {
+        await q.lockStudentSession(client, args.studentId, args.sessionWindowId);
+        const event = await q.getEventById(client, args.eventId);
+        if (!event) throw notFound('Event not found');
+        await this.ensureEventUsable(event, client);
+        const window = await q.getWindowById(client, args.sessionWindowId);
+        if (!window || window.event_id !== args.eventId) {
+          throw notFound('Session window not found for this event');
+        }
+        this.ensureSessionAcceptingScans({ event, window });
+        const student = await q.getStudentById(client, args.studentId);
+        if (!student) throw notFound('Student not found');
 
-      const result = await this.determineDirection({
-        eventId: args.eventId,
-        studentId: args.studentId,
-        sessionWindowId: args.sessionWindowId,
-        db: client,
-        forUpdate: true,
-      });
-      if (!result.canScan) {
-        throw conflict(`Already timed IN & OUT for ${window.session_label}`, {
-          code: 'ALREADY_COMPLETE',
+        const result = await this.determineDirection({
+          eventId: args.eventId,
+          studentId: args.studentId,
+          sessionWindowId: args.sessionWindowId,
+          db: client,
+          forUpdate: true,
         });
-      }
-      if (args.expectedDirection && args.expectedDirection !== result.direction) {
-        throw conflict(
-          `Attendance state changed — now would be ${result.direction}. Please re-scan.`,
-          { code: 'DIRECTION_CHANGED', computed_direction: result.direction },
-        );
-      }
+        if (!result.canScan) {
+          throw conflict(`Already timed IN & OUT for ${window.session_label}`, {
+            code: 'ALREADY_COMPLETE',
+          });
+        }
+        if (args.expectedDirection && args.expectedDirection !== result.direction) {
+          throw conflict(
+            `Attendance state changed — now would be ${result.direction}. Please re-scan.`,
+            { code: 'DIRECTION_CHANGED', computed_direction: result.direction },
+          );
+        }
 
-      return q.insertAttendance(client, {
-        eventId: args.eventId,
-        studentId: args.studentId,
-        sessionWindowId: args.sessionWindowId,
-        direction: result.direction,
-        scannedAt: this.now(),
-        scannedBy: args.scannedBy,
-        status: SCAN_STATUS.confirmed,
-        deviceNote: note,
-      });
-    });
+        return q.insertAttendance(client, {
+          eventId: args.eventId,
+          studentId: args.studentId,
+          sessionWindowId: args.sessionWindowId,
+          direction: result.direction,
+          scannedAt: this.now(),
+          scannedBy: args.scannedBy,
+          status: SCAN_STATUS.confirmed,
+          deviceNote: note,
+        });
+      }),
+    );
   }
 
   async cancel(args: {
@@ -344,24 +383,26 @@ export class AttendanceService {
     deviceNote?: string | null;
   }): Promise<AttendanceLogRow> {
     const note = sanitizeDeviceNote(args.deviceNote);
-    const event = await q.getEventById(this.pool, args.eventId);
-    if (!event) throw notFound('Event not found');
-    await this.ensureEventUsable(event);
-    const window = await q.getWindowById(this.pool, args.sessionWindowId);
-    if (!window || window.event_id !== args.eventId) {
-      throw notFound('Session window not found for this event');
-    }
-    this.ensureSessionAcceptingScans({ event, window });
+    return this.writes.run(args.studentId, args.sessionWindowId, async () => {
+      const event = await this.catalog.getEventById(args.eventId);
+      if (!event) throw notFound('Event not found');
+      await this.ensureEventUsable(event);
+      const window = await this.catalog.getWindowById(args.sessionWindowId);
+      if (!window || window.event_id !== args.eventId) {
+        throw notFound('Session window not found for this event');
+      }
+      this.ensureSessionAcceptingScans({ event, window });
 
-    return q.insertAttendance(this.pool, {
-      eventId: args.eventId,
-      studentId: args.studentId,
-      sessionWindowId: args.sessionWindowId,
-      direction: args.direction ?? DIRECTION.in,
-      scannedAt: this.now(),
-      scannedBy: args.scannedBy,
-      status: SCAN_STATUS.cancelled,
-      deviceNote: note,
+      return q.insertAttendance(this.pool, {
+        eventId: args.eventId,
+        studentId: args.studentId,
+        sessionWindowId: args.sessionWindowId,
+        direction: args.direction ?? DIRECTION.in,
+        scannedAt: this.now(),
+        scannedBy: args.scannedBy,
+        status: SCAN_STATUS.cancelled,
+        deviceNote: note,
+      });
     });
   }
 

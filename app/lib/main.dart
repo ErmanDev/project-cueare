@@ -11,15 +11,15 @@ void main() {
   runApp(
     ProviderScope(
       // Riverpod 3 retries failing providers with back-off by default and
-      // reports "loading" meanwhile. On a LAN app we want the "server
-      // unreachable" error to show immediately with a Retry button instead.
+      // reports "loading" meanwhile. We want the "server unreachable"
+      // error to show immediately with a Retry button instead.
       retry: (_, _) => null,
       child: const SscAttendanceApp(),
     ),
   );
 }
 
-/// Mouse / trackpad dragging so lists and RefreshIndicator work in the browser.
+/// Mouse / trackpad dragging so lists and RefreshIndicator work on Windows.
 class AppScrollBehavior extends MaterialScrollBehavior {
   @override
   Set<PointerDeviceKind> get dragDevices => {

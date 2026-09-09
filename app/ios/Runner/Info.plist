@@ -12,14 +12,14 @@
 	<string>The camera is used to scan student QR codes for attendance.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<!-- The server is plain http on the local network. -->
+		<!-- IIS may publish the site as http:// until a certificate is installed. -->
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Connects to the attendance server on your local Wi-Fi network.</string>
+	<string>Connects to the campus attendance server published by IIS.</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>

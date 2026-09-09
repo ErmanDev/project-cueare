@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import type { Pool } from 'pg';
 
 import { AttendanceService, computeDirection, pickWindowForTime } from '../src/attendance/service.ts';
@@ -10,6 +10,20 @@ import { ApiError } from '../src/utils/errors.ts';
 import { hashPassword } from '../src/auth/password.ts';
 
 const SCHEMA = 'ssc_test';
+
+async function expectRejected(
+  promise: Promise<unknown>,
+  match: Record<string, unknown>,
+): Promise<void> {
+  let err: unknown;
+  try {
+    await promise;
+  } catch (e) {
+    err = e;
+  }
+  expect(err).toBeDefined();
+  expect(err).toMatchObject(match);
+}
 
 describe('AttendanceService', () => {
   let pool: Pool;
@@ -160,14 +174,15 @@ describe('AttendanceService', () => {
       });
       expect(r.direction).toBe(DIRECTION.alreadyComplete);
       expect(r.canScan).toBe(false);
-      await expect(
+      await expectRejected(
         service.confirm({
           eventId,
           studentId,
           sessionWindowId: morningId,
           scannedBy: moderatorId,
         }),
-      ).rejects.toMatchObject({ statusCode: 409 });
+        { statusCode: 409 },
+      );
     });
 
     it('cancelled scans do not affect the count', async () => {
@@ -209,6 +224,33 @@ describe('AttendanceService', () => {
       expect(r.direction).toBe(DIRECTION.in);
     });
 
+    it('serializes concurrent confirms for the same student', async () => {
+      if (!dbReady) return;
+      const [first, second] = await Promise.all([
+        service.confirm({
+          eventId,
+          studentId,
+          sessionWindowId: morningId,
+          scannedBy: moderatorId,
+        }),
+        service.confirm({
+          eventId,
+          studentId,
+          sessionWindowId: morningId,
+          scannedBy: moderatorId,
+        }),
+      ]);
+      const directions = [first.direction, second.direction].sort();
+      expect(directions).toEqual([DIRECTION.in, DIRECTION.out]);
+      const third = service.confirm({
+        eventId,
+        studentId,
+        sessionWindowId: morningId,
+        scannedBy: moderatorId,
+      });
+      await expectRejected(third, { statusCode: 409, details: { code: 'ALREADY_COMPLETE' } });
+    });
+
     it('confirm rejects a stale expected direction', async () => {
       if (!dbReady) return;
       await service.confirm({
@@ -217,7 +259,7 @@ describe('AttendanceService', () => {
         sessionWindowId: morningId,
         scannedBy: moderatorId,
       });
-      await expect(
+      await expectRejected(
         service.confirm({
           eventId,
           studentId,
@@ -225,7 +267,8 @@ describe('AttendanceService', () => {
           scannedBy: moderatorId,
           expectedDirection: DIRECTION.in,
         }),
-      ).rejects.toMatchObject({ statusCode: 409, details: { code: 'DIRECTION_CHANGED' } });
+        { statusCode: 409, details: { code: 'DIRECTION_CHANGED' } },
+      );
     });
   });
 
@@ -258,20 +301,22 @@ describe('AttendanceService', () => {
     it('preview in auto mode outside windows returns 422', async () => {
       if (!dbReady) return;
       fakeNow = new Date(2026, 8, 5, 18, 0);
-      await expect(
+      await expectRejected(
         service.preview({ eventId, qrPayload: 'STU-2026-0001' }),
-      ).rejects.toMatchObject({ statusCode: 422, details: { code: 'NO_ACTIVE_WINDOW' } });
+        { statusCode: 422, details: { code: 'NO_ACTIVE_WINDOW' } },
+      );
     });
 
     it('manual override rejected before chosen session starts', async () => {
       if (!dbReady) return;
-      await expect(
+      await expectRejected(
         service.preview({
           eventId,
           qrPayload: 'STU-2026-0001',
           sessionWindowId: afternoonId,
         }),
-      ).rejects.toMatchObject({ statusCode: 409, details: { code: 'SESSION_NOT_STARTED' } });
+        { statusCode: 409, details: { code: 'SESSION_NOT_STARTED' } },
+      );
     });
 
     it('manual override works while the chosen session is open', async () => {
@@ -290,37 +335,40 @@ describe('AttendanceService', () => {
     it('rejects scans before the session start time', async () => {
       if (!dbReady) return;
       fakeNow = new Date(2026, 8, 5, 6, 30);
-      await expect(
+      await expectRejected(
         service.preview({
           eventId,
           qrPayload: 'STU-2026-0001',
           sessionWindowId: morningId,
         }),
-      ).rejects.toMatchObject({ statusCode: 409, details: { code: 'SESSION_NOT_STARTED' } });
+        { statusCode: 409, details: { code: 'SESSION_NOT_STARTED' } },
+      );
     });
 
     it('rejects scans on a different day than the event', async () => {
       if (!dbReady) return;
       fakeNow = new Date(2026, 8, 4, 8, 30);
-      await expect(
+      await expectRejected(
         service.preview({
           eventId,
           qrPayload: 'STU-2026-0001',
           sessionWindowId: morningId,
         }),
-      ).rejects.toMatchObject({ statusCode: 409, details: { code: 'EVENT_NOT_TODAY' } });
+        { statusCode: 409, details: { code: 'EVENT_NOT_TODAY' } },
+      );
     });
 
     it('manual override still requires the session to be open', async () => {
       if (!dbReady) return;
       fakeNow = new Date(2026, 8, 5, 18, 0);
-      await expect(
+      await expectRejected(
         service.preview({
           eventId,
           qrPayload: 'STU-2026-0001',
           sessionWindowId: afternoonId,
         }),
-      ).rejects.toMatchObject({ statusCode: 409, details: { code: 'SESSION_ENDED' } });
+        { statusCode: 409, details: { code: 'SESSION_ENDED' } },
+      );
     });
 
     it('override window from another event is rejected', async () => {
@@ -338,42 +386,46 @@ describe('AttendanceService', () => {
         endTime: '12:00',
         sortOrder: 0,
       });
-      await expect(
+      await expectRejected(
         service.preview({
           eventId,
           qrPayload: 'STU-2026-0001',
           sessionWindowId: otherWindow.id,
         }),
-      ).rejects.toMatchObject({ statusCode: 404 });
+        { statusCode: 404 },
+      );
     });
   });
 
   describe('preview', () => {
     it('unknown student code → 404', async () => {
       if (!dbReady) return;
-      await expect(
+      await expectRejected(
         service.preview({ eventId, qrPayload: 'NOPE' }),
-      ).rejects.toMatchObject({ statusCode: 404 });
+        { statusCode: 404 },
+      );
     });
 
     it('inactive event → 409', async () => {
       if (!dbReady) return;
       await q.updateEvent(pool, eventId, { isActive: false });
-      await expect(
+      await expectRejected(
         service.preview({ eventId, qrPayload: 'STU-2026-0001' }),
-      ).rejects.toMatchObject({ statusCode: 409 });
+        { statusCode: 409 },
+      );
     });
 
     it('past event date is invalid automatically', async () => {
       if (!dbReady) return;
       fakeNow = new Date(2026, 8, 6, 8, 30);
-      await expect(
+      await expectRejected(
         service.preview({
           eventId,
           qrPayload: 'STU-2026-0001',
           sessionWindowId: morningId,
         }),
-      ).rejects.toMatchObject({ statusCode: 409, details: { code: 'EVENT_DATE_PASSED' } });
+        { statusCode: 409, details: { code: 'EVENT_DATE_PASSED' } },
+      );
       const event = await q.getEventById(pool, eventId);
       expect(event?.is_active).toBe(false);
     });
@@ -451,9 +503,10 @@ describe('AttendanceService', () => {
   describe('validateWindow', () => {
     it('rejects overlapping windows on the same event', async () => {
       if (!dbReady) return;
-      await expect(
+      await expectRejected(
         service.validateWindow({ eventId, startTime: '11:00', endTime: '13:30' }),
-      ).rejects.toMatchObject({ statusCode: 409, details: { code: 'WINDOW_OVERLAP' } });
+        { statusCode: 409, details: { code: 'WINDOW_OVERLAP' } },
+      );
     });
 
     it('allows adjacent windows and edits of itself', async () => {
@@ -469,12 +522,14 @@ describe('AttendanceService', () => {
 
     it('rejects start >= end and bad formats', async () => {
       if (!dbReady) return;
-      await expect(
+      await expectRejected(
         service.validateWindow({ eventId, startTime: '10:00', endTime: '09:00' }),
-      ).rejects.toMatchObject({ statusCode: 400 });
-      await expect(
+        { statusCode: 400 },
+      );
+      await expectRejected(
         service.validateWindow({ eventId, startTime: '25:00', endTime: '09:00' }),
-      ).rejects.toMatchObject({ statusCode: 400 });
+        { statusCode: 400 },
+      );
     });
   });
 

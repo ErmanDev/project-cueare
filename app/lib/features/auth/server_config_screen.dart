@@ -1,5 +1,4 @@
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -29,8 +28,7 @@ class _ServerConfigScreenState extends ConsumerState<ServerConfigScreen> {
   void initState() {
     super.initState();
     final current = ref.read(serverSettingsProvider).value;
-    _controller.text = current?.display ??
-        (kIsWeb ? ServerSettings.sameOrigin?.display ?? 'localhost:8080' : '');
+    _controller.text = current?.display ?? '';
   }
 
   @override
@@ -45,7 +43,7 @@ class _ServerConfigScreenState extends ConsumerState<ServerConfigScreen> {
     final settings = _parsed();
     if (settings == null) {
       setState(() {
-        _testResult = 'Enter an address like 192.168.1.10:8080';
+        _testResult = 'Enter the IIS host name, like attendance.yourschool.edu';
         _testOk = false;
       });
       return;
@@ -74,8 +72,8 @@ class _ServerConfigScreenState extends ConsumerState<ServerConfigScreen> {
       setState(() {
         _testOk = false;
         _testResult =
-            'Could not reach ${settings.display}. Is the server running, the '
-            'firewall open on port ${settings.port}, and are you on the same Wi-Fi?';
+            'Could not reach ${settings.display}. Is the IIS site started, '
+            'the attendance backend running, and this host name in DNS?';
       });
     } finally {
       if (mounted) setState(() => _testing = false);
@@ -85,7 +83,7 @@ class _ServerConfigScreenState extends ConsumerState<ServerConfigScreen> {
   Future<void> _save() async {
     final settings = _parsed();
     if (settings == null) {
-      showSnack(context, 'Enter an address like 192.168.1.10:8080');
+      showSnack(context, 'Enter the IIS host name, like attendance.yourschool.edu');
       return;
     }
     await ref.read(serverSettingsProvider.notifier).save(settings);
@@ -118,12 +116,8 @@ class _ServerConfigScreenState extends ConsumerState<ServerConfigScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  kIsWeb
-                      ? 'If you opened this from the attendance server URL, it '
-                            'should already be connected. Otherwise enter the '
-                            'laptop LAN address (same Wi-Fi).'
-                      : 'Enter the LAN IP address and port of the laptop running the '
-                            'server. Everyone must be on the same Wi-Fi network.',
+                  'Enter the host name bound on Internet Information Services '
+                  '(IIS). Use https:// if the site has a certificate.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: scheme.onSurfaceVariant),
                 ),
@@ -134,7 +128,7 @@ class _ServerConfigScreenState extends ConsumerState<ServerConfigScreen> {
                   autocorrect: false,
                   decoration: const InputDecoration(
                     labelText: 'Server address',
-                    hintText: '192.168.1.10:8080',
+                    hintText: 'attendance.yourschool.edu',
                     prefixIcon: Icon(Icons.dns_outlined),
                   ),
                   onChanged: (_) => setState(() => _testResult = null),
@@ -192,8 +186,8 @@ class _ServerConfigScreenState extends ConsumerState<ServerConfigScreen> {
                 ),
                 const SizedBox(height: 24),
                 Text(
-                  'Tip: on the server laptop run `ipconfig` (Windows) and look '
-                  'for the IPv4 address of the Wi-Fi adapter.',
+                  'This is the IIS site binding (for example the school DNS '
+                  'name or the Windows server name), not a laptop IP address.',
                   textAlign: TextAlign.center,
                   style: Theme.of(
                     context,

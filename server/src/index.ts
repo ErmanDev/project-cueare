@@ -8,15 +8,16 @@ async function main(): Promise<void> {
   await ensureSchema(getPool());
   const app = createApp();
   const webDir = resolveWebDist();
-  app.listen(config.port, '0.0.0.0', () => {
-    console.log(`SSC QR Attendance listening on 0.0.0.0:${config.port}`);
+  app.listen(config.port, config.listenHost, () => {
+    console.log(`SSC QR Attendance listening on ${config.listenHost}:${config.port}`);
     if (webDir) {
-      console.log(`Web app:     http://localhost:${config.port}/`);
+      console.log(`Web app:     http://127.0.0.1:${config.port}/`);
     } else {
-      console.log(`Web app:     not built yet — run npm run build:web`);
+      console.log(`Web app:     not built yet — run bun run build:web`);
     }
-    console.log(`REST API:    http://localhost:${config.port}/api`);
-    console.log(`Swagger UI:  http://localhost:${config.port}/docs`);
+    console.log(`REST API:    http://127.0.0.1:${config.port}/api`);
+    console.log(`Swagger UI:  http://127.0.0.1:${config.port}/docs`);
+    console.log(`Public URL:  IIS site host name (see plan/IIS_SETUP.md)`);
     console.log(`Database: ${poolDisplay()}`);
   });
 }

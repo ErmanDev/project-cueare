@@ -65,6 +65,7 @@ adminRouter.post(
       section,
       photoUrl,
     });
+    service(req).rememberStudent(created);
     res.status(201).json({
       ...studentToApi(created),
       qr_payload: service(req).qrPayloadFor(created),
@@ -137,6 +138,7 @@ adminRouter.post(
       }
     });
 
+    service(req).invalidateAllStudents();
     res.json({
       created,
       updated,
@@ -188,6 +190,8 @@ adminRouter.put(
       hasPhoto,
       photoUrl,
     });
+    service(req).invalidateStudent(existing);
+    service(req).rememberStudent(updated);
     res.json({
       ...studentToApi(updated),
       qr_payload: service(req).qrPayloadFor(updated),
@@ -202,6 +206,7 @@ adminRouter.delete(
     const existing = await q.getStudentById(getPool(), id);
     if (!existing) throw notFound('Student not found');
     await q.deleteStudent(getPool(), id);
+    service(req).invalidateStudent(existing);
     res.status(204).end();
   }),
 );
@@ -236,6 +241,7 @@ adminRouter.post(
     const isActive = optionalBool(body, 'is_active') ?? true;
     const rawWindows = body.session_windows;
 
+    let createdEventId = 0;
     const result = await withTransaction(getPool(), async (client) => {
       const event = await q.insertEvent(client, {
         name,
@@ -243,6 +249,7 @@ adminRouter.post(
         isActive,
         createdBy: req.auth!.id,
       });
+      createdEventId = event.id;
       if (Array.isArray(rawWindows)) {
         let order = 0;
         for (const raw of rawWindows) {
@@ -273,6 +280,7 @@ adminRouter.post(
         session_windows: windows.map(windowToApi),
       };
     });
+    svc.invalidateEvent(createdEventId);
     res.status(201).json(result);
   }),
 );
@@ -317,6 +325,7 @@ adminRouter.post(
       endTime: end,
       sortOrder,
     });
+    svc.invalidateEvent(eventId);
     res.status(201).json(windowToApi(created));
   }),
 );
@@ -357,6 +366,7 @@ adminRouter.put(
       eventDate: date ?? undefined,
       isActive: isActive ?? undefined,
     });
+    svc.invalidateEvent(id);
     const windows = await svc.windowsForEvent(id);
     res.json({
       ...eventToApi(updated, svc.now()),
@@ -372,6 +382,7 @@ adminRouter.delete(
     const existing = await q.getEventById(getPool(), id);
     if (!existing) throw notFound('Event not found');
     await q.deleteEvent(getPool(), id);
+    service(req).invalidateEvent(id);
     res.status(204).end();
   }),
 );
@@ -416,6 +427,7 @@ adminRouter.put(
       endTime: end,
       sortOrder: sortOrder ?? undefined,
     });
+    service(req).invalidateEvent(existing.event_id);
     res.json(windowToApi(updated));
   }),
 );
@@ -435,6 +447,7 @@ adminRouter.delete(
       );
     }
     await q.deleteWindow(getPool(), id);
+    service(req).invalidateEvent(existing.event_id);
     res.status(204).end();
   }),
 );

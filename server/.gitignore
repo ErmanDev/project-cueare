@@ -18,3 +18,4 @@ attendance.db
 attendance.db-*
 jwt_secret.txt
 .env
+logs/

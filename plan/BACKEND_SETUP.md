@@ -1,17 +1,19 @@
-# Backend Setup Guide — Express + TypeScript + PostgreSQL, Local/LAN
+# Backend Setup Guide — Express + TypeScript + PostgreSQL behind IIS
 
 > **Status:** `/server` is an Express REST API wired to **PostgreSQL** (schema `ssc`).
 > The Flutter app talks to the same JSON endpoints as before.
 
-Step-by-step instructions to get the API running on your machine,
+Step-by-step instructions to get the API running on this Windows machine,
 storing data in PostgreSQL (viewable in DBeaver, pgAdmin, HeidiSQL, etc.), and
-reachable by phones on the same Wi-Fi network.
+published through **IIS**. Phones use the IIS host name, not a laptop IP.
+
+Full IIS walkthrough: [`IIS_SETUP.md`](IIS_SETUP.md).
 
 ---
 
 ## Quick start
 
-Prereqs: Node.js 20+, PostgreSQL running locally (you have `postgresql-x64-18`).
+Prereqs: **Bun** 1.2+, PostgreSQL running locally (you have `postgresql-x64-18`).
 
 ```powershell
 cd server
@@ -22,12 +24,12 @@ cd server
 # or: $env:DATABASE_URL = 'postgres://postgres:YOUR_POSTGRES_PASSWORD@localhost:5432/aclc'
 
 # 2) Create DB + admin
-npm install
-npm run ensure-db
-npm run seed-admin          # admin / changeme123
+bun install
+bun run ensure-db
+bun run seed-admin          # admin / changeme123
 
 # 3) Run API
-npm run dev                 # http://0.0.0.0:8080
+bun run dev                 # http://127.0.0.1:8080  (IIS is the public URL)
 ```
 
 Open in DBeaver / pgAdmin / HeidiSQL:
@@ -58,7 +60,9 @@ addon, then connect with HeidiSQL/DBeaver/pgAdmin.
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `PORT` | `8080` | Listen port |
+| `PORT` | `8080` | Backend listen port (localhost only) |
+| `LISTEN_HOST` | `127.0.0.1` | Bind address — keep localhost; IIS proxies in |
+| `TRUST_PROXY` | `true` | Honor `X-Forwarded-*` from IIS |
 | `DATABASE_URL` | — | `postgres://user:pass@host:5432/aclc` (overrides discrete vars) |
 | `DATABASE_HOST` | `localhost` | |
 | `DATABASE_PORT` | `5432` | |
@@ -68,26 +72,35 @@ addon, then connect with HeidiSQL/DBeaver/pgAdmin.
 | `JWT_SECRET` | auto `jwt_secret.txt` | |
 | `JWT_TTL_HOURS` | `12` | |
 | `QR_HMAC_SECRET` | unset | Optional signed QR payloads |
+| `SCAN_CACHE_TTL_MS` | `30000` | In-memory student cache TTL |
+| `EVENT_CACHE_TTL_MS` | `15000` | In-memory event/window cache TTL |
+| `SCAN_BATCH_WINDOW_MS` | `8` | How long to coalesce QR student lookups |
+| `SCAN_WRITE_CONCURRENCY` | `8` | Max parallel confirm/cancel writes |
+| `RATE_LIMIT_ENABLED` | `true` | In-process login/scan rate limits |
+| `RATE_LIMIT_LOGIN_MAX` | `10` | Login attempts per IP/username per window |
+| `RATE_LIMIT_SCAN_PREVIEW_MAX` | `40` | Preview scans per moderator per window |
+| `RATE_LIMIT_SCAN_WRITE_MAX` | `20` | Confirm/cancel per moderator per window |
 
 ---
 
-## Firewall
+## Publish with IIS
 
-Windows Security → Firewall → Advanced → Inbound Rule → TCP `8080` → Allow.
+Do not open port 8080 on the firewall and do not type a laptop IPv4 into the app.
 
-Find your LAN IP (`ipconfig` → Wi-Fi IPv4), then point the Flutter app's Server
-Settings at `YOUR_IP:8080`.
+1. Keep Bun on `127.0.0.1:8080` (`bun start`).
+2. Follow [`IIS_SETUP.md`](IIS_SETUP.md): ARR reverse proxy, site host name on port 80/443.
+3. In the Flutter app, Server Settings → `attendance.yourschool.edu` → Test → Save.
 
 ## Sanity checklist
 
 - [ ] Postgres service running (`postgresql-x64-18`)
-- [ ] `npm run ensure-db` + `npm run seed-admin` succeeded
-- [ ] Phone and laptop on the same Wi-Fi
-- [ ] Firewall allows 8080
-- [ ] Browser on phone or laptop: `http://YOUR_IP:8080/` opens the Flutter app
-      (Staff / Student). `http://YOUR_IP:8080/api` returns JSON `"status":"ok"`
+- [ ] `bun run ensure-db` + `bun run seed-admin` succeeded
+- [ ] `http://127.0.0.1:8080/api/health` works on the server
+- [ ] IIS site is started; ARR proxy enabled
+- [ ] Firewall allows 80/443 (not 8080)
+- [ ] Phone browser: `http://attendance.yourschool.edu/api` returns `"status":"ok"`
 
-Reset admin password: `npm run seed-admin -- admin newpassword`.
-Create another superadmin: `npm run seed-admin -- erman epass123`.
+Reset admin password: `bun run seed-admin -- admin newpassword`.
+Create another superadmin: `bun run seed-admin -- erman epass123`.
 
-Tests: `npm test`.
+Tests: `bun test`.

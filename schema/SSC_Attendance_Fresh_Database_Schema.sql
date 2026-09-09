@@ -429,6 +429,14 @@ CREATE INDEX IF NOT EXISTS ix_attendance_logs_record
 CREATE INDEX IF NOT EXISTS ix_attendance_logs_lookup
       ON "AttendanceLogs" ("recordedAtUtc");
 
+CREATE UNIQUE INDEX IF NOT EXISTS ux_attendance_logs_one_checkin
+      ON "AttendanceLogs" ("attendanceRecordId")
+      WHERE "actionCode" = 'CHECK_IN' AND "isCancelled" = false;
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_attendance_logs_one_checkout
+      ON "AttendanceLogs" ("attendanceRecordId")
+      WHERE "actionCode" = 'CHECK_OUT' AND "isCancelled" = false;
+
 CREATE OR REPLACE VIEW "AttendanceSessionStatus" AS
      SELECT
        r."attendanceRecordId",

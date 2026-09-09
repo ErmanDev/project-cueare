@@ -3,6 +3,7 @@ import { Router, type Request } from 'express';
 import { AttendanceService, pickWindowForTime, previewToApi } from '../attendance/service.ts';
 import * as q from '../db/queries.ts';
 import { getPool } from '../db/pool.ts';
+import { scanPreviewGuard, scanWriteGuard } from '../infra/httpGuards.ts';
 import { SCAN_STATUS } from '../types.ts';
 import { badRequest, notFound } from '../utils/errors.ts';
 import {
@@ -34,8 +35,8 @@ moderatorRouter.get(
     const svc = service(req);
     const now = svc.now();
     await svc.deactivateExpiredEvents();
-    const events = await q.listActiveEvents(getPool());
-    const windows = await q.listAllWindows(getPool());
+    const events = await svc.catalog.listActiveEvents();
+    const windows = await svc.catalog.listAllWindows();
     const list = events
       .filter((e) => isTodayOrFuture(e.event_date, now))
       .map((e) => {
@@ -128,6 +129,7 @@ moderatorRouter.get(
 
 moderatorRouter.post(
   '/scan/preview',
+  scanPreviewGuard,
   asyncHandler(async (req, res) => {
     const svc = service(req);
     const body = jsonObject(req);
@@ -146,6 +148,7 @@ moderatorRouter.post(
 
 moderatorRouter.post(
   '/scan/confirm',
+  scanWriteGuard,
   asyncHandler(async (req, res) => {
     const svc = service(req);
     const body = jsonObject(req);
@@ -164,6 +167,7 @@ moderatorRouter.post(
 
 moderatorRouter.post(
   '/scan/cancel',
+  scanWriteGuard,
   asyncHandler(async (req, res) => {
     const svc = service(req);
     const body = jsonObject(req);

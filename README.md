@@ -1,17 +1,19 @@
 # SSC QR Attendance
 
-LAN-only QR event attendance: an **Express + TypeScript + PostgreSQL** REST API (runs on a
-laptop) and a **Flutter** app — phones (Android/iOS APK) **or any browser** (same
-superadmin / moderator / student UI). No internet or cloud required — every
-device just joins the same Wi-Fi router.
+QR event attendance: an **Express + TypeScript + PostgreSQL** REST API behind
+**Internet Information Services (IIS)** on Windows, a **React** admin/moderator web
+app, and a **Flutter** app for phones (Android/iOS) and Windows. Clients use the
+IIS host name — not a laptop LAN IP.
 
 ```
-/server   Express + TypeScript REST API + PostgreSQL + Flutter web
-/app      Flutter app (Android / iOS / web; Windows for admin screens)
+/server   Express + TypeScript REST API + PostgreSQL (Bun)
+/web      React + TypeScript admin & moderator UI
+/app      Flutter app (Android / iOS / Windows)
 /plan     Original build plan + backend / Postgres setup notes
 ```
 
-**Postgres setup & GUI monitoring:** see [`plan/POSTGRES_SETUP.md`](plan/POSTGRES_SETUP.md).
+**Postgres:** [`plan/POSTGRES_SETUP.md`](plan/POSTGRES_SETUP.md).  
+**IIS (how phones reach the server):** [`plan/IIS_SETUP.md`](plan/IIS_SETUP.md).
 
 ## 1. PostgreSQL (one-time)
 
@@ -36,9 +38,9 @@ $env:DATABASE_PASSWORD = 'YOUR_POSTGRES_PASSWORD'
 2. Create the database + seed the admin:
 
 ```powershell
-npm install
-npm run ensure-db      # CREATE DATABASE aclc if missing
-npm run seed-admin     # admin / changeme123
+bun install
+bun run ensure-db      # CREATE DATABASE aclc if missing
+bun run seed-admin     # admin / changeme123
 ```
 
 ### Monitor in a GUI (DBeaver / pgAdmin / HeidiSQL)
@@ -59,62 +61,64 @@ Tables appear after the first server start / seed in schema `ssc` (`"Users"`,
 > Windows installer (you already have it), Docker, or a Laragon Postgres addon — then
 > connect with HeidiSQL/DBeaver/pgAdmin. Do **not** point this app at MySQL.
 
-## 2. Run the server (laptop)
+## 2. Run the backend (localhost) and publish it with IIS
 
 ```powershell
 cd server
-npm install
-npm run build:web        # Flutter web UI (once, or after app changes)
-npm run dev              # tsx watch, port 8080 (or PORT env)
+bun install
+bun run build:web        # React UI → ../web/dist (once, or after web changes)
+bun run dev              # watch; listens on 127.0.0.1:8080
 ```
 
 For events, run without the file watcher:
 
 ```powershell
-npm start                # PORT env var overrides 8080
+bun start                # still 127.0.0.1:8080 — IIS is the public address
 ```
 
-Then:
+On this Windows machine only: [http://127.0.0.1:8080/](http://127.0.0.1:8080/) (admin/moderator
+web app), `/api`, and `/docs`.
 
-1. `ipconfig` → note the Wi-Fi adapter's **IPv4 address** (e.g. `192.168.1.10`).
-2. Allow inbound TCP **8080** in Windows Firewall (Advanced settings → Inbound Rules → New Rule → Port).
-3. Open **`http://192.168.1.10:8080/`** on a laptop or phone browser — that is the
-   Flutter app (Staff login or Student code). REST JSON is at `/api`.
-   Swagger UI (laptop): `http://localhost:8080/docs`.
+Then publish that process through IIS (host name on port 80 or 443). Follow
+[`plan/IIS_SETUP.md`](plan/IIS_SETUP.md). Do not point phones at a laptop IPv4 or at port 8080.
 
-If you skip `npm run build:web`, `/` still returns API JSON and phones must use the APK.
+During development you can also run the UI with Vite (proxies `/api` to port 8080):
+
+```powershell
+cd web
+pnpm install
+pnpm dev                 # http://localhost:5173
+```
+
+If you skip `bun run build:web`, `/` still returns API JSON.
 
 Runtime file (git-ignored): `jwt_secret.txt` (auto-generated; delete it to invalidate all logins).
 
 Optional env vars: `DATABASE_URL` (or `DATABASE_HOST` / `PORT` / `NAME` / `USER` / `PASSWORD`),
-`JWT_SECRET`, `JWT_TTL_HOURS` (default 12), `QR_HMAC_SECRET`, `WEB_DIST` (override Flutter web folder).
+`JWT_SECRET`, `JWT_TTL_HOURS` (default 12), `QR_HMAC_SECRET`, `WEB_DIST` (override React dist folder).
 
-Reset the admin password: `npm run seed-admin -- admin newpassword`.
+Reset the admin password: `bun run seed-admin -- admin newpassword`.
 
-Tests: `npm test` (unit tests always; attendance engine tests need Postgres).
+Tests: `bun test` (unit tests always; attendance engine tests need Postgres).
 
-## 3. Run the app (phones or Chrome)
-
-**Browser (recommended for superadmin on the laptop, and for students):** after
-`npm run build:web` and `npm start`, open `http://YOUR_LAN_IP:8080/` — same
-origin, no server-address screen.
-
-**APK / `flutter run` (phones):**
+## 3. Run the app (phones or Windows)
 
 ```powershell
 cd app
 flutter pub get
 flutter run            # or: flutter build apk --release
-flutter run -d chrome  # Flutter web against the API at localhost:8080
 ```
 
-First launch on a native build asks for the **server address** (`192.168.1.10:8080`) —
-use *Test connection* then *Save*. It can be changed later from the ethernet icon
-on any screen.
+First launch asks for the **IIS host name** (`attendance.yourschool.edu` or
+`https://attendance.yourschool.edu`) — use *Test connection* then *Save*. It can
+be changed later from the ethernet icon on any screen.
 
-Camera scanning in a **phone/laptop browser over `http://192.168.x.x`** may be
-blocked (browsers require HTTPS except on localhost). Moderators can still type
-the student code, or use the Android APK for the camera.
+Moderators who cannot use the camera can still type the student code (keyboard
+icon on the scanner).
+
+Camera scanning in a **browser over plain HTTP** may be blocked (browsers
+require HTTPS except on localhost). Put a certificate on the IIS site, or type
+the student code instead.
 
 ## 4. Workflow
 
@@ -162,14 +166,15 @@ GET  /api/student/:code/qr        GET /api/student/:code/attendance
 ```
 
 `/api/admin/*` requires a superadmin JWT, `/api/moderator/*` a moderator JWT
-(`Authorization: Bearer <token>`); `/api/student/*` is unauthenticated (LAN only, read-only).
+(`Authorization: Bearer <token>`); `/api/student/*` is unauthenticated (read-only).
 
 ## 6. Troubleshooting
 
-* **Phone can't connect** — same Wi-Fi (not guest network / mobile data)? Server running?
-  Firewall rule for 8080? IP still the same (set a DHCP reservation for the laptop)?
+* **Phone can't connect** — IIS site started? Bun listening on `127.0.0.1:8080`?
+  Host name in DNS? Firewall allows 80/443 (not 8080)? App Server Settings uses
+  that host name?
 * **"No active session window right now"** — server time is outside all windows; pick a
   session manually or fix the windows in the event editor.
 * **Camera black on Android** — grant camera permission; the app also has a
   "type code manually" fallback (keyboard icon on the scanner).
-* **Forgot admin password** — `npm run seed-admin -- admin newpass`.
+* **Forgot admin password** — `bun run seed-admin -- admin newpass`.

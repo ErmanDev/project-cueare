@@ -2,10 +2,10 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../app');
+const webDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../web');
 
-const result = spawnSync('flutter', ['build', 'web', '--release', '--base-href', '/'], {
-  cwd: appDir,
+const result = spawnSync('pnpm', ['run', 'build'], {
+  cwd: webDir,
   stdio: 'inherit',
   shell: true,
 });
