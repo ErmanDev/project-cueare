@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 
-import { Button, EmptyState } from '../../components/ui'
+import { Button, EmptyState, ScanHistorySkeleton } from '../../components/ui'
 import { api } from '../../lib/api'
 import { fmtDateTime } from '../../lib/format'
 import { useModerator } from '../../lib/moderator'
@@ -48,7 +48,7 @@ export function ModeratorHistory() {
       </div>
       {error ? <p className="error-text">{error}</p> : null}
       {rows === null && !error ? (
-        <p className="loading">Loading scans…</p>
+        <ScanHistorySkeleton />
       ) : rows && rows.length === 0 ? (
         <EmptyState title="No scans yet today" subtitle={selected ? `Event: ${selected.name}` : undefined} />
       ) : (

@@ -1,4 +1,6 @@
-import { type FormEvent, type ReactNode } from 'react'
+import { type CSSProperties, type FormEvent, type ReactNode } from 'react'
+
+import { Logo } from './Logo'
 
 export function Button({
   children,
@@ -113,4 +115,270 @@ export function onSubmit(fn: () => void | Promise<void>) {
     e.preventDefault()
     void fn()
   }
+}
+
+const BONE_WIDTHS = ['72%', '54%', '86%', '48%', '64%', '78%', '42%', '70%']
+
+export function Bone({
+  width = '100%',
+  height = 14,
+  radius,
+  className = '',
+}: {
+  width?: string | number
+  height?: string | number
+  radius?: string | number
+  className?: string
+}) {
+  const style: CSSProperties = {
+    width: typeof width === 'number' ? `${width}px` : width,
+    height: typeof height === 'number' ? `${height}px` : height,
+  }
+  if (radius != null) {
+    style.borderRadius = typeof radius === 'number' ? `${radius}px` : radius
+  }
+  return <span className={`skeleton${className ? ` ${className}` : ''}`} style={style} aria-hidden="true" />
+}
+
+export type SkeletonColumn = {
+  label: string
+  width?: string | number
+  variant?: 'text' | 'actions' | 'chip' | 'chips' | 'dir'
+  count?: number
+}
+
+function SkeletonCell({ column, row }: { column: SkeletonColumn; row: number }) {
+  const width = column.width ?? BONE_WIDTHS[(row + column.label.length) % BONE_WIDTHS.length]
+  switch (column.variant) {
+    case 'actions':
+      return (
+        <div className="menu end">
+          {Array.from({ length: column.count ?? 2 }, (_, i) => (
+            <Bone key={i} width={28} height={28} radius={8} />
+          ))}
+        </div>
+      )
+    case 'chip':
+      return <Bone width={width} height={24} radius={999} />
+    case 'chips':
+      return (
+        <div className="windows">
+          <Bone width={110} height={24} radius={999} />
+          <Bone width={124} height={24} radius={999} />
+        </div>
+      )
+    case 'dir':
+      return <Bone width={44} height={24} radius={8} />
+    default:
+      return <Bone width={width} height={14} />
+  }
+}
+
+export function TableSkeleton({
+  columns,
+  rows = 8,
+  tableClass = '',
+  label,
+  quiet,
+  meta = true,
+}: {
+  columns: SkeletonColumn[]
+  rows?: number
+  tableClass?: string
+  label?: string
+  quiet?: boolean
+  meta?: boolean
+}) {
+  return (
+    <div
+      className="card table-card"
+      {...(quiet ? {} : { role: 'status', 'aria-busy': true, 'aria-live': 'polite' as const })}
+    >
+      {label && !quiet ? <span className="visually-hidden">{label}</span> : null}
+      <div className="table-wrap">
+        <table className={`data is-skeleton${tableClass ? ` ${tableClass}` : ''}`}>
+          <thead>
+            <tr>
+              {columns.map((col, i) => (
+                <th key={`${col.label}-${i}`}>{col.label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {Array.from({ length: rows }, (_, row) => (
+              <tr key={row}>
+                {columns.map((col, i) => (
+                  <td key={`${i}-${row}`}>
+                    <SkeletonCell column={col} row={row} />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {meta ? (
+        <div className="table-meta">
+          <Bone width={148} height={12} />
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+export function CardListSkeleton({
+  count = 5,
+  label,
+}: {
+  count?: number
+  label: string
+}) {
+  return (
+    <div className="list" role="status" aria-busy="true" aria-live="polite">
+      <span className="visually-hidden">{label}</span>
+      {Array.from({ length: count }, (_, i) => (
+        <article key={i} className="card row">
+          <Bone width={40} height={40} radius="50%" />
+          <div className="grow skeleton-stack">
+            <Bone width={`${42 + (i % 3) * 8}%`} height={16} />
+            <Bone width={`${24 + (i % 2) * 8}%`} height={12} />
+          </div>
+          <Bone width={32} height={32} radius={8} />
+          <Bone width={32} height={32} radius={8} />
+        </article>
+      ))}
+    </div>
+  )
+}
+
+export function EventPanelSkeleton() {
+  return (
+    <div className="list" role="status" aria-busy="true" aria-live="polite">
+      <span className="visually-hidden">Loading events</span>
+      <article className="card welcome-card skeleton-event-card">
+        <div className="skeleton-stack grow">
+          <Bone width="58%" height={20} />
+          <Bone width="34%" height={14} />
+          <div className="windows">
+            <Bone width={128} height={26} radius={999} />
+            <Bone width={140} height={26} radius={999} />
+          </div>
+        </div>
+      </article>
+      <div className="skeleton-stack">
+        <Bone width={180} height={18} />
+        <Bone width={240} height={12} />
+        <Bone width="100%" height={44} radius={12} />
+      </div>
+      <Bone width="100%" height={64} radius={12} />
+      <Bone width="100%" height={44} radius={12} />
+    </div>
+  )
+}
+
+export function ScanHistorySkeleton() {
+  return (
+    <div role="status" aria-busy="true" aria-live="polite">
+      <span className="visually-hidden">Loading scans</span>
+      <div className="card row stats-row">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="stat skeleton-stat">
+            <Bone width={36} height={22} />
+            <Bone width={48} height={12} />
+          </div>
+        ))}
+      </div>
+      <TableSkeleton
+        quiet
+        meta={false}
+        rows={6}
+        columns={[
+          { label: 'Dir', variant: 'dir', width: 44 },
+          { label: 'Student', width: '68%' },
+          { label: 'Session', width: '52%' },
+          { label: 'When', width: '60%' },
+        ]}
+      />
+    </div>
+  )
+}
+
+export function LoginFormSkeleton() {
+  return (
+    <div className="form-grid login-form" role="status" aria-busy="true" aria-live="polite">
+      <span className="visually-hidden">Checking your session</span>
+      <div className="field">
+        <Bone width={72} height={11} />
+        <Bone width="100%" height={44} radius={12} />
+      </div>
+      <div className="field">
+        <Bone width={64} height={11} />
+        <Bone width="100%" height={44} radius={12} />
+      </div>
+      <Bone width="100%" height={44} radius={12} />
+    </div>
+  )
+}
+
+export function BootSkeleton() {
+  return (
+    <div className="app-shell" role="status" aria-busy="true" aria-live="polite">
+      <span className="visually-hidden">Loading</span>
+      <aside className="sidebar">
+        <div className="sidebar-brand">
+          <Logo size={40} className="sidebar-logo" />
+          <div className="skeleton-stack">
+            <Bone width={118} height={14} />
+            <Bone width={86} height={10} />
+          </div>
+        </div>
+        <nav className="skeleton-nav">
+          {[72, 58, 80, 66, 90].map((w, i) => (
+            <div key={i} className="nav-link">
+              <Bone width={18} height={18} radius={6} />
+              <Bone width={w} height={12} />
+            </div>
+          ))}
+        </nav>
+        <div className="sidebar-spacer" />
+        <div className="sidebar-user">
+          <Bone width={40} height={40} radius="50%" />
+          <div className="grow skeleton-stack">
+            <Bone width="70%" height={12} />
+            <Bone width="46%" height={10} />
+          </div>
+        </div>
+      </aside>
+      <main className="content">
+        <div className="page">
+          <div className="home">
+            <div className="page-head">
+              <div className="skeleton-stack">
+                <Bone width={168} height={28} />
+                <Bone width={240} height={14} />
+              </div>
+            </div>
+            <div className="card welcome-card">
+              <Bone width={52} height={52} radius="50%" />
+              <div className="skeleton-stack grow">
+                <Bone width="44%" height={18} />
+                <Bone width="26%" height={12} />
+              </div>
+            </div>
+            <nav className="home-tiles" aria-hidden="true">
+              {[0, 1, 2, 3].map((i) => (
+                <article key={i} className="card card-click">
+                  <Bone width={44} height={44} radius={12} />
+                  <div className="grow skeleton-stack">
+                    <Bone width={`${38 + (i % 3) * 10}%`} height={16} />
+                    <Bone width={`${56 + (i % 2) * 12}%`} height={12} />
+                  </div>
+                </article>
+              ))}
+            </nav>
+          </div>
+        </div>
+      </main>
+    </div>
+  )
 }

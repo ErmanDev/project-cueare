@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 
 import { Shell } from './components/Shell'
+import { BootSkeleton } from './components/ui'
 import { AuthProvider, useAuth } from './lib/auth'
 import { ModeratorProvider } from './lib/moderator'
 import { ToastProvider } from './lib/toast'
@@ -18,7 +19,7 @@ import { ModeratorScan } from './pages/moderator/Scan'
 
 function RequireRole({ role, children }: { role: Role; children: ReactNode }) {
   const { user, ready } = useAuth()
-  if (!ready) return null
+  if (!ready) return <BootSkeleton />
   if (!user) return <Navigate to="/login" replace />
   if (user.role !== role) {
     return <Navigate to={user.role === 'superadmin' ? '/superadmin' : '/scanner'} replace />
@@ -46,7 +47,7 @@ function ModeratorLayout() {
 
 function HomeRedirect() {
   const { user, ready } = useAuth()
-  if (!ready) return null
+  if (!ready) return <BootSkeleton />
   if (!user) return <Navigate to="/login" replace />
   return <Navigate to={user.role === 'superadmin' ? '/superadmin' : '/scanner'} replace />
 }

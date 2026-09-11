@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Pencil, Plus, Trash2 } from 'lucide-react'
 
-import { Button, EmptyState, Field, FormActions, Modal, onSubmit } from '../../components/ui'
+import { Button, EmptyState, Field, FormActions, Modal, TableSkeleton, onSubmit } from '../../components/ui'
 import { api } from '../../lib/api'
 import { fmtRange, fmtWeekday, isToday, minutes, ymd } from '../../lib/format'
 import { useToast } from '../../lib/toast'
@@ -90,7 +90,18 @@ export function AdminEvents() {
       </div>
       {error ? <p className="error-text">{error}</p> : null}
       {events === null && !error ? (
-        <p className="loading">Loading events…</p>
+        <TableSkeleton
+          label="Loading events"
+          tableClass="events-table"
+          rows={6}
+          columns={[
+            { label: 'Event', width: '68%' },
+            { label: 'Date', variant: 'chip', width: 88 },
+            { label: 'Sessions', variant: 'chips' },
+            { label: 'Status', variant: 'chip', width: 72 },
+            { label: '', variant: 'actions' },
+          ]}
+        />
       ) : events && events.length === 0 ? (
         <EmptyState
           title="No events yet"

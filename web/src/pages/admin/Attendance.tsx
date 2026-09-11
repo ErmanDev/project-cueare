@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Download, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 
-import { Button, EmptyState, Field, FormActions, Modal, onSubmit } from '../../components/ui'
+import { Button, EmptyState, Field, FormActions, Modal, TableSkeleton, onSubmit } from '../../components/ui'
 import { api } from '../../lib/api'
 import { fmtDateTime, fmtTime, fmtYearLevel } from '../../lib/format'
 import { useToast } from '../../lib/toast'
@@ -184,7 +184,26 @@ export function AdminAttendance() {
       </div>
       {error ? <p className="error-text">{error}</p> : null}
       {rows === null && !error ? (
-        <p className="loading">Loading records…</p>
+        <TableSkeleton
+          label="Loading records"
+          tableClass="attendance-table"
+          rows={8}
+          columns={[
+            { label: 'Student ID', width: '70%' },
+            { label: 'First name', width: '64%' },
+            { label: 'Middle name', width: '48%' },
+            { label: 'Last name', width: '56%' },
+            { label: 'Course', width: '42%' },
+            { label: 'Year level', width: '50%' },
+            { label: 'Sectioning', width: '36%' },
+            { label: 'Dir', variant: 'dir' },
+            { label: 'Event', width: '58%' },
+            { label: 'Session', width: '52%' },
+            { label: 'When', width: '64%' },
+            { label: 'By', width: '46%' },
+            { label: '', variant: 'actions' },
+          ]}
+        />
       ) : rows && rows.length === 0 ? (
         <EmptyState title="No records match" />
       ) : (

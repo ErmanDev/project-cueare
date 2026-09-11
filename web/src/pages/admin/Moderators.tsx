@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Pencil, Plus, Trash2 } from 'lucide-react'
 
-import { Button, EmptyState, Field, FormActions, Modal, onSubmit } from '../../components/ui'
+import { Button, CardListSkeleton, EmptyState, Field, FormActions, Modal, onSubmit } from '../../components/ui'
 import { api } from '../../lib/api'
 import { initial } from '../../lib/format'
 import { useToast } from '../../lib/toast'
@@ -57,7 +57,7 @@ export function AdminModerators() {
       </div>
       {error ? <p className="error-text">{error}</p> : null}
       {list === null && !error ? (
-        <p className="loading">Loading moderators…</p>
+        <CardListSkeleton label="Loading moderators" />
       ) : list && list.length === 0 ? (
         <EmptyState
           title="No moderators yet"

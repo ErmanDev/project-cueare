@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 
-import { Button, EmptyState, Field, Modal, onSubmit } from '../../components/ui'
+import { Button, EmptyState, Field, Modal, TableSkeleton, onSubmit } from '../../components/ui'
 import { api } from '../../lib/api'
 import { fmtYearLevel } from '../../lib/format'
 import { useToast } from '../../lib/toast'
@@ -106,7 +106,21 @@ export function AdminStudents() {
       </div>
       {error ? <p className="error-text">{error}</p> : null}
       {students === null && !error ? (
-        <p className="loading">Loading students…</p>
+        <TableSkeleton
+          label="Loading students"
+          tableClass="students-table"
+          rows={PAGE_SIZE}
+          columns={[
+            { label: 'Student ID', width: '72%' },
+            { label: 'First name', width: '64%' },
+            { label: 'Middle name', width: '48%' },
+            { label: 'Last name', width: '58%' },
+            { label: 'Course', width: '44%' },
+            { label: 'Year level', width: '50%' },
+            { label: 'Sectioning', width: '36%' },
+            { label: '', variant: 'actions', count: 3 },
+          ]}
+        />
       ) : students && students.length === 0 ? (
         <EmptyState
           title={query ? 'No matches' : 'No students yet'}

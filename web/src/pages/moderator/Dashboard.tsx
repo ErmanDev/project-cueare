@@ -1,7 +1,7 @@
 import { History, QrCode, RefreshCw } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
-import { Button, EmptyState } from '../../components/ui'
+import { Button, EmptyState, EventPanelSkeleton } from '../../components/ui'
 import { useAuth } from '../../lib/auth'
 import { fmtRange, fmtWeekday, initial } from '../../lib/format'
 import { useModerator } from '../../lib/moderator'
@@ -34,7 +34,7 @@ export function ModeratorDashboard() {
         Choose the event you are scanning for
       </p>
       {error ? <p className="error-text">{error}</p> : null}
-      {loading && events.length === 0 ? <p className="muted">Loading events…</p> : null}
+      {loading && events.length === 0 ? <EventPanelSkeleton /> : null}
       {!loading && events.length === 0 ? (
         <EmptyState
           title="No active events"

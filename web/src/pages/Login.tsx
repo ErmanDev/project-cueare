@@ -3,7 +3,7 @@ import { Navigate } from "react-router-dom";
 import { Eye, EyeOff, LoaderCircle } from "lucide-react";
 
 import { Logo } from "../components/Logo";
-import { Button, Field } from "../components/ui";
+import { Button, Field, LoginFormSkeleton } from "../components/ui";
 import { useAuth } from "../lib/auth";
 import { ApiError } from "../lib/api";
 
@@ -44,7 +44,7 @@ export function LoginPage() {
   if (!ready) {
     return (
       <LoginFrame>
-        <p className="muted login-lead">Checking your session…</p>
+        <LoginFormSkeleton />
       </LoginFrame>
     );
   }

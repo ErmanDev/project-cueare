@@ -463,6 +463,94 @@ p {
   margin: 4px 0 16px;
 }
 
+.skeleton {
+  display: block;
+  background: var(--surface-high);
+  border-radius: 6px;
+  position: relative;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--surface-lowest) 62%, transparent) 50%,
+    transparent 100%
+  );
+  transform: translateX(-100%);
+  animation: skeleton-shimmer 1.35s ease-in-out infinite;
+}
+
+.skeleton-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.skeleton-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.skeleton-event-card {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.skeleton-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sidebar .skeleton {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.sidebar .skeleton::after {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.22) 50%,
+    transparent 100%
+  );
+}
+
+.welcome-card .skeleton {
+  background: color-mix(in srgb, var(--on-primary-container) 16%, transparent);
+}
+
+.welcome-card .skeleton::after {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--on-primary-container) 18%, transparent) 50%,
+    transparent 100%
+  );
+}
+
+table.data.is-skeleton tr:hover td {
+  background: transparent;
+}
+
+.login-form > .skeleton:last-child {
+  margin-top: 8px;
+}
+
+@keyframes skeleton-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
 .row {
   display: flex;
   align-items: center;
@@ -1203,6 +1291,11 @@ p {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .skeleton::after {
+    animation: none;
+    display: none;
+  }
+
   .login-card {
     transition: none;
   }
@@ -1264,6 +1357,14 @@ p {
   .login-card {
     border-color: CanvasText;
     box-shadow: none;
+  }
+
+  .skeleton {
+    background: GrayText;
+  }
+
+  .skeleton::after {
+    display: none;
   }
 }
 
