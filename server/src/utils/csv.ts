@@ -1,4 +1,11 @@
-export function parseCsv(input: string): string[][] {
+export function detectDelimiter(input: string): ',' | '\t' {
+  const first = input.split(/\r?\n/, 1)[0] ?? '';
+  const tabs = (first.match(/\t/g) ?? []).length;
+  const commas = (first.match(/,/g) ?? []).length;
+  return tabs > commas ? '\t' : ',';
+}
+
+export function parseCsv(input: string, delimiter: string = ','): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
   let field = '';
@@ -20,7 +27,7 @@ export function parseCsv(input: string): string[][] {
       }
     } else if (c === '"') {
       inQuotes = true;
-    } else if (c === ',') {
+    } else if (c === delimiter) {
       row.push(field);
       field = '';
     } else if (c === '\r') {

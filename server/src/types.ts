@@ -48,7 +48,12 @@ export type UserRow = {
 export type StudentRow = {
   id: number;
   student_id_code: string;
+  first_name: string;
+  middle_name: string | null;
+  last_name: string;
   full_name: string;
+  course: string | null;
+  year_level: number | null;
   section: string | null;
   photo_url: string | null;
   created_at: Date;

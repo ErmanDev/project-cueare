@@ -61,13 +61,28 @@ export const openApiDocument = {
         type: 'object',
         properties: {
           id: { type: 'integer' },
-          student_id_code: { type: 'string', example: 'STU-2026-0001' },
+          student_id_code: { type: 'string', example: '02-26-0011' },
+          first_name: { type: 'string', nullable: true },
+          middle_name: { type: 'string', nullable: true },
+          last_name: { type: 'string', nullable: true },
           full_name: { type: 'string' },
+          course: { type: 'string', nullable: true, example: 'BSIT' },
+          year_level: { type: 'integer', nullable: true, example: 1 },
           section: { type: 'string', nullable: true },
           photo_url: { type: 'string', nullable: true },
           created_at: { type: 'string', format: 'date-time' },
           updated_at: { type: 'string', format: 'date-time' },
           qr_payload: { type: 'string', description: 'Value encoded in the student QR' },
+        },
+      },
+      StudentPage: {
+        type: 'object',
+        required: ['students', 'total', 'page', 'per_page'],
+        properties: {
+          students: { type: 'array', items: { $ref: '#/components/schemas/Student' } },
+          total: { type: 'integer' },
+          page: { type: 'integer' },
+          per_page: { type: 'integer' },
         },
       },
       SessionWindow: {
@@ -112,7 +127,12 @@ export const openApiDocument = {
           device_note: { type: 'string', nullable: true },
           updated_at: { type: 'string', format: 'date-time' },
           student_id_code: { type: 'string', nullable: true },
+          first_name: { type: 'string', nullable: true },
+          middle_name: { type: 'string', nullable: true },
+          last_name: { type: 'string', nullable: true },
           student_name: { type: 'string', nullable: true },
+          course: { type: 'string', nullable: true },
+          year_level: { type: 'integer', nullable: true },
           student_section: { type: 'string', nullable: true },
           session_label: { type: 'string', nullable: true },
           scanned_by_name: { type: 'string', nullable: true },
@@ -294,13 +314,31 @@ export const openApiDocument = {
             schema: { type: 'string' },
             description: 'Search name, code, or section',
           },
+          {
+            name: 'page',
+            in: 'query',
+            schema: { type: 'integer', minimum: 1 },
+            description: '1-based page. When set with per_page, returns a StudentPage object.',
+          },
+          {
+            name: 'per_page',
+            in: 'query',
+            schema: { type: 'integer', minimum: 1, maximum: 100, default: 10 },
+            description: 'Page size. Omit page and per_page to receive the full array (mobile clients).',
+          },
         ],
         responses: {
           '200': {
-            description: 'Students with QR payloads',
+            description:
+              'Full student array when unpaginated; { students, total, page, per_page } when page or per_page is set',
             content: {
               'application/json': {
-                schema: { type: 'array', items: { $ref: '#/components/schemas/Student' } },
+                schema: {
+                  oneOf: [
+                    { type: 'array', items: { $ref: '#/components/schemas/Student' } },
+                    { $ref: '#/components/schemas/StudentPage' },
+                  ],
+                },
               },
             },
           },
@@ -346,7 +384,10 @@ export const openApiDocument = {
         tags: ['Admin — Students'],
         summary: 'Bulk import students',
         description:
-          'JSON `{csv}` / `{students}` or raw `text/csv`. Existing codes are upserted unless `mode=skip`.',
+          'Accepts the school roster headers from `sample_data.xls` ' +
+          '(`StudentID`, `FName`, `LName`, `MName`, `COURSE`, `YrLevel`, `Sectioning`, plus unused extra columns). ' +
+          'JSON `{csv}` / `{spreadsheet}` / `{students}`, raw `text/csv`, or an Excel body. ' +
+          'Existing codes are upserted unless `mode=skip`.',
         security: bearer,
         parameters: [
           {
@@ -362,12 +403,27 @@ export const openApiDocument = {
               schema: {
                 type: 'object',
                 properties: {
-                  csv: { type: 'string' },
+                  csv: {
+                    type: 'string',
+                    description:
+                      'CSV or tab-separated roster. Preferred headers: StudentID, FName, LName, MName, COURSE, YrLevel, Sectioning',
+                  },
+                  spreadsheet: {
+                    type: 'string',
+                    description: 'Base64-encoded .xls or .xlsx workbook',
+                  },
                   students: {
                     type: 'array',
                     items: {
                       type: 'object',
                       properties: {
+                        StudentID: { type: 'string' },
+                        FName: { type: 'string' },
+                        LName: { type: 'string' },
+                        MName: { type: 'string' },
+                        COURSE: { type: 'string' },
+                        YrLevel: { type: 'string' },
+                        Sectioning: { type: 'string' },
                         student_id_code: { type: 'string' },
                         full_name: { type: 'string' },
                         section: { type: 'string' },
@@ -379,6 +435,10 @@ export const openApiDocument = {
               },
             },
             'text/csv': { schema: { type: 'string' } },
+            'application/vnd.ms-excel': { schema: { type: 'string', format: 'binary' } },
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': {
+              schema: { type: 'string', format: 'binary' },
+            },
           },
         },
         responses: {

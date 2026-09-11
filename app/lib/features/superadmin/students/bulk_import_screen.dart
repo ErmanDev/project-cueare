@@ -22,9 +22,9 @@ class _BulkImportScreenState extends ConsumerState<BulkImportScreen> {
   Map<String, dynamic>? _result;
 
   static const _template =
-      'student_id_code,full_name,section\n'
-      'STU-2026-0001,Juan Dela Cruz,BSIT-3A\n'
-      'STU-2026-0002,Maria Clara,BSIT-3B';
+      'StudentID,FName,LName,MName,COURSE,YrLevel,Sectioning\n'
+      '02-26-0999,Juan,Dela Cruz,Santos,BSIT,1st Year,A\n'
+      '02-26-1000,Maria,Clara,,BSBA,1st Year,B';
 
   @override
   void dispose() {
@@ -72,9 +72,9 @@ class _BulkImportScreenState extends ConsumerState<BulkImportScreen> {
         padding: const EdgeInsets.all(16),
         children: [
           Text(
-            'Paste CSV with a header row. Columns: student_id_code, full_name, '
-            'section (optional), photo_url (optional). Tab-separated data from a '
-            'spreadsheet is fine if you replace tabs with commas first.',
+            'Paste CSV using the school roster headers from sample_data.xls: '
+            'StudentID, FName, LName, MName, COURSE, YrLevel, Sectioning. '
+            'Extra columns are ignored. Tab-separated data pasted from Excel is accepted.',
             style: TextStyle(color: scheme.onSurfaceVariant),
           ),
           const SizedBox(height: 12),

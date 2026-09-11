@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Download, Pencil, Trash2 } from 'lucide-react'
+import { Download, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 
 import { Button, EmptyState, Field, FormActions, Modal, onSubmit } from '../../components/ui'
 import { api } from '../../lib/api'
-import { fmtDateShort, fmtDateTime, fmtTime } from '../../lib/format'
+import { fmtDateTime, fmtTime, fmtYearLevel } from '../../lib/format'
 import { useToast } from '../../lib/toast'
 import type { AttendanceLog, AttendanceQuery, Event, SessionWindow } from '../../lib/types'
+import { EventForm } from './Events'
 
 export function AdminAttendance() {
   const { toast } = useToast()
@@ -15,6 +16,7 @@ export function AdminAttendance() {
   const [filter, setFilter] = useState<AttendanceQuery>({})
   const [search, setSearch] = useState('')
   const [editing, setEditing] = useState<AttendanceLog | null>(null)
+  const [creatingEvent, setCreatingEvent] = useState(false)
   const [exporting, setExporting] = useState(false)
 
   const selected = events.find((e) => e.id === filter.event_id)
@@ -37,9 +39,24 @@ export function AdminAttendance() {
     }
   }
 
+  async function loadEvents() {
+    try {
+      setEvents(await api.get<Event[]>('/admin/events'))
+    } catch {
+      /* filter still works with an empty list */
+    }
+  }
+
   useEffect(() => {
-    void api.get<Event[]>('/admin/events').then(setEvents).catch(() => undefined)
+    void loadEvents()
   }, [])
+
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      setFilter((f) => ({ ...f, q: search.trim() || undefined }))
+    }, 350)
+    return () => window.clearTimeout(t)
+  }, [search])
 
   useEffect(() => {
     void load()
@@ -89,88 +106,80 @@ export function AdminAttendance() {
           <h2>Attendance records</h2>
           <p>Filter, correct, delete, export CSV</p>
         </div>
-        <Button variant="secondary" onClick={() => void exportCsv()} disabled={exporting}>
-          <Download size={16} /> {exporting ? 'Exporting…' : 'Export CSV'}
-        </Button>
-      </div>
-      <div className="card filters">
-        <div className="grid-2">
-          <Field label="Event">
-            <select
-              value={filter.event_id ?? ''}
-              onChange={(e) =>
-                setFilter((f) => ({
-                  ...f,
-                  event_id: e.target.value ? Number(e.target.value) : undefined,
-                  session_window_id: undefined,
-                }))
-              }
-            >
-              <option value="">All events</option>
-              {events.map((ev) => (
-                <option key={ev.id} value={ev.id}>
-                  {ev.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Session">
-            <select
-              value={filter.session_window_id ?? ''}
-              disabled={windows.length === 0}
-              onChange={(e) =>
-                setFilter((f) => ({
-                  ...f,
-                  session_window_id: e.target.value ? Number(e.target.value) : undefined,
-                }))
-              }
-            >
-              <option value="">All</option>
-              {windows.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.session_label}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Student name / code">
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') setFilter((f) => ({ ...f, q: search.trim() || undefined }))
-              }}
-            />
-          </Field>
-          <Field label="Date">
-            <div className="row">
-              <input
-                type="date"
-                value={filter.date ?? ''}
-                onChange={(e) => setFilter((f) => ({ ...f, date: e.target.value || undefined }))}
-              />
-              {filter.date ? (
-                <Button variant="ghost" className="btn-sm" onClick={() => setFilter((f) => ({ ...f, date: undefined }))}>
-                  Clear {fmtDateShort(filter.date)}
-                </Button>
-              ) : null}
-            </div>
-          </Field>
+        <div className="toolbar">
+          <Button variant="secondary" onClick={() => void exportCsv()} disabled={exporting}>
+            <Download size={16} /> {exporting ? 'Exporting…' : 'Export CSV'}
+          </Button>
+          <Button onClick={() => setCreatingEvent(true)}>
+            <Plus size={18} /> Create Event
+          </Button>
         </div>
-        <div className="row filters-status">
-          <span className="muted">Status</span>
-          <div className="segmented">
-            {(['all', 'confirmed', 'cancelled'] as const).map((s) => (
-              <button
-                key={s}
-                type="button"
-                className={(filter.status ?? 'all') === s ? 'active' : ''}
-                onClick={() => setFilter((f) => ({ ...f, status: s === 'all' ? undefined : s }))}
-              >
-                {s[0]!.toUpperCase() + s.slice(1)}
-              </button>
-            ))}
-          </div>
+      </div>
+      <div className="filter-bar">
+        <div className="search">
+          <Search size={16} />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search name or student ID"
+          />
+        </div>
+        <select
+          className="filter-control"
+          aria-label="Event"
+          value={filter.event_id ?? ''}
+          onChange={(e) =>
+            setFilter((f) => ({
+              ...f,
+              event_id: e.target.value ? Number(e.target.value) : undefined,
+              session_window_id: undefined,
+            }))
+          }
+        >
+          <option value="">All events</option>
+          {events.map((ev) => (
+            <option key={ev.id} value={ev.id}>
+              {ev.name}
+            </option>
+          ))}
+        </select>
+        <select
+          className="filter-control"
+          aria-label="Session"
+          value={filter.session_window_id ?? ''}
+          disabled={windows.length === 0}
+          onChange={(e) =>
+            setFilter((f) => ({
+              ...f,
+              session_window_id: e.target.value ? Number(e.target.value) : undefined,
+            }))
+          }
+        >
+          <option value="">All sessions</option>
+          {windows.map((w) => (
+            <option key={w.id} value={w.id}>
+              {w.session_label}
+            </option>
+          ))}
+        </select>
+        <input
+          className="filter-control"
+          type="date"
+          aria-label="Date"
+          value={filter.date ?? ''}
+          onChange={(e) => setFilter((f) => ({ ...f, date: e.target.value || undefined }))}
+        />
+        <div className="segmented" role="group" aria-label="Status">
+          {(['all', 'confirmed', 'cancelled'] as const).map((s) => (
+            <button
+              key={s}
+              type="button"
+              className={(filter.status ?? 'all') === s ? 'active' : ''}
+              onClick={() => setFilter((f) => ({ ...f, status: s === 'all' ? undefined : s }))}
+            >
+              {s[0]!.toUpperCase() + s.slice(1)}
+            </button>
+          ))}
         </div>
       </div>
       {error ? <p className="error-text">{error}</p> : null}
@@ -181,11 +190,18 @@ export function AdminAttendance() {
       ) : (
         <div className="card table-card">
           <div className="table-wrap">
-            <table className="data">
+            <table className="data attendance-table">
               <thead>
                 <tr>
+                  <th>Student ID</th>
+                  <th>First name</th>
+                  <th>Middle name</th>
+                  <th>Last name</th>
+                  <th>Course</th>
+                  <th>Year level</th>
+                  <th>Sectioning</th>
                   <th>Dir</th>
-                  <th>Student</th>
+                  <th>Event</th>
                   <th>Session</th>
                   <th>When</th>
                   <th>By</th>
@@ -194,18 +210,20 @@ export function AdminAttendance() {
               </thead>
               <tbody>
                 {(rows ?? []).map((log) => (
-                  <tr key={log.id}>
+                  <tr key={log.id} className={log.status === 'cancelled' ? 'is-cancelled' : undefined}>
+                    <td>{log.student_id_code ?? '—'}</td>
+                    <td className={log.status === 'cancelled' ? 'struck' : ''}>
+                      <strong>{log.first_name || log.student_name || `Student #${log.student_id}`}</strong>
+                    </td>
+                    <td className="muted">{log.middle_name || '—'}</td>
+                    <td>{log.last_name || '—'}</td>
+                    <td className="muted">{log.course || '—'}</td>
+                    <td className="muted">{fmtYearLevel(log.year_level)}</td>
+                    <td className="muted">{log.student_section ?? '—'}</td>
                     <td>
                       <span className={`dir ${log.direction.toLowerCase()}`}>{log.direction}</span>
                     </td>
-                    <td className={log.status === 'cancelled' ? 'struck' : ''}>
-                      <strong>{log.student_name ?? `Student #${log.student_id}`}</strong>
-                      <div className="muted">
-                        {[log.student_id_code, log.event_name, log.status === 'cancelled' ? 'CANCELLED' : null]
-                          .filter(Boolean)
-                          .join(' · ')}
-                      </div>
-                    </td>
+                    <td className="muted">{log.event_name ?? '—'}</td>
                     <td>{log.session_label ?? `Session #${log.session_window_id}`}</td>
                     <td>{fmtDateTime(log.scanned_at)}</td>
                     <td className="muted">{log.scanned_by_name ?? '—'}</td>
@@ -231,6 +249,16 @@ export function AdminAttendance() {
           ) : null}
         </div>
       )}
+      {creatingEvent ? (
+        <EventForm
+          existing={null}
+          onClose={() => setCreatingEvent(false)}
+          onSaved={() => {
+            setCreatingEvent(false)
+            void loadEvents()
+          }}
+        />
+      ) : null}
       {editing ? (
         <EditAttendance
           log={editing}

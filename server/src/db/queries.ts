@@ -1,6 +1,7 @@
 import type { AttendanceDetailRow } from '../utils/serialize.ts';
 import { conflict, isPgUniqueViolation } from '../utils/errors.ts';
 import { parseMinutes, startOfDay } from '../utils/time.ts';
+import { PROGRAM_NAMES, type MappedImportStudent } from '../students/roster.ts';
 import { escapeLike } from '../utils/studentCode.ts';
 import { q } from './ident.ts';
 import type {
@@ -45,13 +46,32 @@ async function defaultTermId(db: Queryable): Promise<number> {
 }
 
 async function defaultProgramId(db: Queryable): Promise<number> {
+  return ensureProgram(db, DEFAULT_PROGRAM);
+}
+
+async function activeTermId(db: Queryable): Promise<number | null> {
+  const row = await one<{ academic_term_id: number }>(
+    db,
+    `SELECT ${q('academicTermId')} AS academic_term_id FROM ${q('AcademicTerms')}
+     WHERE ${q('isActive')} = true
+     ORDER BY ${q('startsOn')} DESC
+     LIMIT 1`,
+  );
+  return row?.academic_term_id ?? null;
+}
+
+export async function ensureProgram(db: Queryable, code: string): Promise<number> {
+  const programCode = code.trim().toUpperCase().slice(0, 30) || DEFAULT_PROGRAM;
+  const name = PROGRAM_NAMES[programCode] ?? programCode;
   const row = await one<{ academic_program_id: number }>(
     db,
-    `SELECT ${q('academicProgramId')} AS academic_program_id FROM ${q('AcademicPrograms')} WHERE ${q('programCode')} = $1`,
-    [DEFAULT_PROGRAM],
+    `INSERT INTO ${q('AcademicPrograms')} (${q('programCode')}, ${q('programName')})
+     VALUES ($1, $2)
+     ON CONFLICT (${q('programCode')}) DO UPDATE SET ${q('programName')} = EXCLUDED.${q('programName')}
+     RETURNING ${q('academicProgramId')} AS academic_program_id`,
+    [programCode, name],
   );
-  if (!row) throw new Error('Default academic program is missing');
-  return row.academic_program_id;
+  return row!.academic_program_id;
 }
 
 function splitFullName(fullName: string): {
@@ -173,20 +193,29 @@ const STUDENT_SELECT = `
   SELECT
     s.${q('studentId')} AS id,
     s.${q('studentNumber')} AS student_id_code,
+    s.${q('firstName')} AS first_name,
+    s.${q('middleName')} AS middle_name,
+    s.${q('lastName')} AS last_name,
     trim(concat_ws(' ', s.${q('firstName')}, s.${q('middleName')}, s.${q('lastName')}, s.suffix)) AS full_name,
+    prog.${q('programCode')} AS course,
+    cur.year_level,
     sec.${q('sectionName')} AS section,
     s.${q('photoUrl')} AS photo_url,
     s.${q('createdAtUtc')} AS created_at,
     s.${q('updatedAtUtc')} AS updated_at
   FROM ${q('Students')} s
   LEFT JOIN LATERAL (
-    SELECT se.${q('sectionId')} AS section_id
+    SELECT
+      se.${q('sectionId')} AS section_id,
+      se.${q('academicProgramId')} AS program_id,
+      se.${q('yearLevel')} AS year_level
     FROM ${q('StudentEnrollments')} se
     WHERE se.${q('studentId')} = s.${q('studentId')} AND se.${q('effectiveToUtc')} IS NULL
     ORDER BY se.${q('studentEnrollmentId')} DESC
     LIMIT 1
   ) cur ON true
   LEFT JOIN ${q('Sections')} sec ON sec.${q('sectionId')} = cur.section_id
+  LEFT JOIN ${q('AcademicPrograms')} prog ON prog.${q('academicProgramId')} = cur.program_id
 `;
 
 const EVENT_SELECT = `
@@ -232,7 +261,12 @@ const DETAIL_SELECT = `
     l.${q('deviceNote')} AS device_note,
     l.${q('recordedAtUtc')} AS updated_at,
     s.${q('studentNumber')} AS student_id_code,
+    s.${q('firstName')} AS first_name,
+    s.${q('middleName')} AS middle_name,
+    s.${q('lastName')} AS last_name,
     trim(concat_ws(' ', s.${q('firstName')}, s.${q('middleName')}, s.${q('lastName')}, s.suffix)) AS student_name,
+    prog.${q('programCode')} AS course,
+    cur.year_level,
     sec.${q('sectionName')} AS student_section,
     es.${q('sessionName')} AS session_label,
     actor.${q('displayName')} AS scanned_by_name,
@@ -245,13 +279,17 @@ const DETAIL_SELECT = `
   JOIN ${q('Students')} s ON s.${q('studentId')} = ep.${q('studentId')}
   JOIN ${q('Users')} actor ON actor.${q('userId')} = l.${q('actorUserId')}
   LEFT JOIN LATERAL (
-    SELECT se.${q('sectionId')} AS section_id
+    SELECT
+      se.${q('sectionId')} AS section_id,
+      se.${q('academicProgramId')} AS program_id,
+      se.${q('yearLevel')} AS year_level
     FROM ${q('StudentEnrollments')} se
     WHERE se.${q('studentId')} = s.${q('studentId')} AND se.${q('effectiveToUtc')} IS NULL
     ORDER BY se.${q('studentEnrollmentId')} DESC
     LIMIT 1
   ) cur ON true
   LEFT JOIN ${q('Sections')} sec ON sec.${q('sectionId')} = cur.section_id
+  LEFT JOIN ${q('AcademicPrograms')} prog ON prog.${q('academicProgramId')} = cur.program_id
 `;
 
 export async function getUserById(db: Queryable, id: number): Promise<UserRow | null> {
@@ -356,20 +394,40 @@ export async function countScansByModerator(db: Queryable, userId: number): Prom
   return Number(row?.n ?? 0);
 }
 
-export async function listStudents(db: Queryable, search?: string | null): Promise<StudentRow[]> {
-  if (!search) {
-    return many<StudentRow>(db, `${STUDENT_SELECT} ORDER BY full_name ASC`);
-  }
+function studentSearchFilter(search?: string | null): { where: string; values: unknown[] } {
+  if (!search) return { where: '', values: [] };
   const like = `%${escapeLike(search.toLowerCase())}%`;
-  return many<StudentRow>(
-    db,
-    `${STUDENT_SELECT}
-     WHERE LOWER(trim(concat_ws(' ', s.${q('firstName')}, s.${q('middleName')}, s.${q('lastName')}, s.suffix))) LIKE $1 ESCAPE '\\'
+  return {
+    where: `WHERE LOWER(trim(concat_ws(' ', s.${q('firstName')}, s.${q('middleName')}, s.${q('lastName')}, s.suffix))) LIKE $1 ESCAPE '\\'
         OR LOWER(s.${q('studentNumber')}) LIKE $1 ESCAPE '\\'
-        OR LOWER(COALESCE(sec.${q('sectionName')}, '')) LIKE $1 ESCAPE '\\'
-     ORDER BY full_name ASC`,
-    [like],
+        OR LOWER(COALESCE(sec.${q('sectionName')}, '')) LIKE $1 ESCAPE '\\'`,
+    values: [like],
+  };
+}
+
+export async function listStudents(db: Queryable, search?: string | null): Promise<StudentRow[]> {
+  const { where, values } = studentSearchFilter(search);
+  return many<StudentRow>(db, `${STUDENT_SELECT} ${where} ORDER BY full_name ASC`, values);
+}
+
+export async function listStudentsPage(
+  db: Queryable,
+  args: { search?: string | null; limit: number; offset: number },
+): Promise<{ rows: StudentRow[]; total: number }> {
+  const { where, values } = studentSearchFilter(args.search);
+  const countRow = await one<{ n: number }>(
+    db,
+    `SELECT COUNT(*)::int AS n FROM (${STUDENT_SELECT} ${where}) listed`,
+    values,
   );
+  const limitIdx = values.length + 1;
+  const offsetIdx = values.length + 2;
+  const rows = await many<StudentRow>(
+    db,
+    `${STUDENT_SELECT} ${where} ORDER BY full_name ASC LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+    [...values, args.limit, args.offset],
+  );
+  return { rows, total: countRow?.n ?? 0 };
 }
 
 export async function getStudentById(db: Queryable, id: number): Promise<StudentRow | null> {
@@ -406,25 +464,42 @@ export async function lockStudentSession(
 
 async function findOrCreateSection(
   db: Queryable,
-  args: { termId: number; programId: number; section: string },
+  args: { termId: number; programId: number; yearLevel: number; section: string },
 ): Promise<number> {
   const code = args.section.trim().slice(0, 30);
+  const yearLevel = args.yearLevel;
   const existing = await one<{ section_id: number }>(
     db,
     `SELECT ${q('sectionId')} AS section_id FROM ${q('Sections')}
-     WHERE ${q('academicTermId')} = $1 AND ${q('academicProgramId')} = $2 AND ${q('sectionCode')} = $3`,
-    [args.termId, args.programId, code],
+     WHERE ${q('academicTermId')} = $1 AND ${q('academicProgramId')} = $2
+       AND ${q('yearLevel')} = $3 AND ${q('sectionCode')} = $4`,
+    [args.termId, args.programId, yearLevel, code],
   );
   if (existing) return existing.section_id;
   const created = await one<{ section_id: number }>(
     db,
     `INSERT INTO ${q('Sections')} (
         ${q('academicTermId')}, ${q('academicProgramId')}, ${q('yearLevel')}, ${q('sectionCode')}, ${q('sectionName')}
-     ) VALUES ($1, $2, 1, $3, $4)
+     ) VALUES ($1, $2, $3, $4, $5)
      RETURNING ${q('sectionId')} AS section_id`,
-    [args.termId, args.programId, code, args.section.trim().slice(0, 100)],
+    [args.termId, args.programId, yearLevel, code, args.section.trim().slice(0, 100)],
   );
   return created!.section_id;
+}
+
+async function resolveEnrollmentTermId(db: Queryable, studentId?: number): Promise<number> {
+  if (studentId != null) {
+    const current = await one<{ academic_term_id: number }>(
+      db,
+      `SELECT ${q('academicTermId')} AS academic_term_id FROM ${q('StudentEnrollments')}
+       WHERE ${q('studentId')} = $1 AND ${q('effectiveToUtc')} IS NULL
+       ORDER BY ${q('studentEnrollmentId')} DESC
+       LIMIT 1`,
+      [studentId],
+    );
+    if (current) return current.academic_term_id;
+  }
+  return (await activeTermId(db)) ?? (await defaultTermId(db));
 }
 
 async function upsertCurrentEnrollment(
@@ -433,10 +508,16 @@ async function upsertCurrentEnrollment(
     studentId: number;
     section: string | null;
     hasSection?: boolean;
+    programCode?: string | null;
+    yearLevel?: number | null;
+    termId?: number;
   },
 ): Promise<void> {
-  const termId = await defaultTermId(db);
-  const programId = await defaultProgramId(db);
+  const termId = args.termId ?? (await defaultTermId(db));
+  const programId = args.programCode
+    ? await ensureProgram(db, args.programCode)
+    : await defaultProgramId(db);
+  const yearLevel = args.yearLevel ?? 1;
   let sectionId: number | null | undefined;
   if (args.hasSection === false) {
     sectionId = undefined;
@@ -446,6 +527,7 @@ async function upsertCurrentEnrollment(
     sectionId = await findOrCreateSection(db, {
       termId,
       programId,
+      yearLevel,
       section: args.section,
     });
   }
@@ -463,17 +545,23 @@ async function upsertCurrentEnrollment(
       `INSERT INTO ${q('StudentEnrollments')} (
           ${q('studentId')}, ${q('academicTermId')}, ${q('academicProgramId')}, ${q('sectionId')},
           ${q('yearLevel')}, ${q('enrollmentStatusCode')}, ${q('effectiveFromUtc')}
-       ) VALUES ($1, $2, $3, $4, 1, 'ENROLLED', clock_timestamp())`,
-      [args.studentId, termId, programId, sectionId ?? null],
+       ) VALUES ($1, $2, $3, $4, $5, 'ENROLLED', clock_timestamp())`,
+      [args.studentId, termId, programId, sectionId ?? null, yearLevel],
     );
     return;
   }
 
   if (sectionId !== undefined) {
     await db.query(
-      `UPDATE ${q('StudentEnrollments')} SET ${q('sectionId')} = $1, ${q('academicProgramId')} = $2, ${q('yearLevel')} = 1
+      `UPDATE ${q('StudentEnrollments')} SET ${q('sectionId')} = $1, ${q('academicProgramId')} = $2, ${q('yearLevel')} = $3
+       WHERE ${q('studentEnrollmentId')} = $4`,
+      [sectionId, programId, yearLevel, current.student_enrollment_id],
+    );
+  } else if (args.programCode || args.yearLevel != null) {
+    await db.query(
+      `UPDATE ${q('StudentEnrollments')} SET ${q('academicProgramId')} = $1, ${q('yearLevel')} = $2
        WHERE ${q('studentEnrollmentId')} = $3`,
-      [sectionId, programId, current.student_enrollment_id],
+      [programId, yearLevel, current.student_enrollment_id],
     );
   }
 }
@@ -508,12 +596,21 @@ export async function insertStudent(
   db: Queryable,
   row: {
     studentIdCode: string;
-    fullName: string;
+    fullName?: string;
+    firstName?: string;
+    middleName?: string | null;
+    lastName?: string;
     section: string | null;
     photoUrl: string | null;
+    programCode?: string | null;
+    yearLevel?: number | null;
+    termId?: number;
   },
 ): Promise<StudentRow> {
-  const names = splitFullName(row.fullName);
+  const names =
+    row.firstName && row.lastName
+      ? { firstName: row.firstName, middleName: row.middleName ?? null, lastName: row.lastName }
+      : splitFullName(row.fullName ?? '');
   const created = await one<{ student_id: number }>(
     db,
     `INSERT INTO ${q('Students')} (
@@ -525,6 +622,9 @@ export async function insertStudent(
   await upsertCurrentEnrollment(db, {
     studentId: created!.student_id,
     section: row.section,
+    programCode: row.programCode,
+    yearLevel: row.yearLevel,
+    termId: row.termId,
   });
   return (await getStudentById(db, created!.student_id))!;
 }
@@ -535,10 +635,16 @@ export async function updateStudent(
   fields: {
     studentIdCode?: string;
     fullName?: string;
+    firstName?: string;
+    middleName?: string | null;
+    lastName?: string;
     section?: string | null;
     photoUrl?: string | null;
     hasSection?: boolean;
     hasPhoto?: boolean;
+    programCode?: string | null;
+    yearLevel?: number | null;
+    termId?: number;
   },
 ): Promise<StudentRow> {
   const sets: string[] = [`${q('updatedAtUtc')} = clock_timestamp()`];
@@ -548,8 +654,13 @@ export async function updateStudent(
     sets.push(`${q('studentNumber')} = $${i++}`);
     values.push(fields.studentIdCode);
   }
-  if (fields.fullName != null) {
-    const names = splitFullName(fields.fullName);
+  const names =
+    fields.firstName && fields.lastName
+      ? { firstName: fields.firstName, middleName: fields.middleName ?? null, lastName: fields.lastName }
+      : fields.fullName != null
+        ? splitFullName(fields.fullName)
+        : null;
+  if (names) {
     sets.push(`${q('firstName')} = $${i++}`);
     values.push(names.firstName);
     sets.push(`${q('middleName')} = $${i++}`);
@@ -563,14 +674,54 @@ export async function updateStudent(
   }
   values.push(id);
   await db.query(`UPDATE ${q('Students')} SET ${sets.join(', ')} WHERE ${q('studentId')} = $${i}`, values);
-  if (fields.hasSection) {
+  if (fields.hasSection || fields.programCode || fields.yearLevel != null) {
     await upsertCurrentEnrollment(db, {
       studentId: id,
       section: fields.section ?? null,
-      hasSection: true,
+      hasSection: fields.hasSection,
+      programCode: fields.programCode,
+      yearLevel: fields.yearLevel,
+      termId: fields.termId,
     });
   }
   return (await getStudentById(db, id))!;
+}
+
+export async function upsertImportedStudent(
+  db: Queryable,
+  row: MappedImportStudent,
+  skipExisting: boolean,
+): Promise<'created' | 'updated' | 'skipped'> {
+  const existing = await getStudentByCode(db, row.studentIdCode);
+  const termId = await resolveEnrollmentTermId(db, existing?.id);
+  if (!existing) {
+    await insertStudent(db, {
+      studentIdCode: row.studentIdCode,
+      firstName: row.firstName,
+      middleName: row.middleName,
+      lastName: row.lastName,
+      section: row.section,
+      photoUrl: row.photoUrl,
+      programCode: row.programCode,
+      yearLevel: row.yearLevel,
+      termId,
+    });
+    return 'created';
+  }
+  if (skipExisting) return 'skipped';
+  await updateStudent(db, existing.id, {
+    firstName: row.firstName,
+    middleName: row.middleName,
+    lastName: row.lastName,
+    hasSection: true,
+    section: row.section ?? existing.section,
+    hasPhoto: row.photoUrl != null,
+    photoUrl: row.photoUrl ?? existing.photo_url,
+    programCode: row.programCode,
+    yearLevel: row.yearLevel,
+    termId,
+  });
+  return 'updated';
 }
 
 export async function deleteStudent(db: Queryable, id: number): Promise<void> {

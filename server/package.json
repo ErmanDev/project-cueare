@@ -12,6 +12,7 @@
     "build:web": "bun scripts/build-web.ts",
     "ensure-db": "bun scripts/ensure-database.ts",
     "seed-admin": "bun scripts/seed-admin.ts",
+    "seed-sample": "bun scripts/seed-sample.ts",
     "test": "bun test --timeout 30000",
     "test:watch": "bun test --watch --timeout 30000"
   },
@@ -24,7 +25,8 @@
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.16.3",
-    "swagger-ui-express": "^5.0.1"
+    "swagger-ui-express": "^5.0.1",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/bun": "^1.4.2",

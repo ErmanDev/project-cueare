@@ -46,8 +46,17 @@ export function createApp(service?: AttendanceService): Express {
     next();
   });
 
-  app.use(express.json({ limit: '2mb' }));
-  app.use(express.text({ type: ['text/csv', 'text/plain'], limit: '2mb' }));
+  app.use(express.json({ limit: '8mb' }));
+  app.use(express.text({ type: ['text/csv', 'text/plain'], limit: '8mb' }));
+  app.use(
+    express.raw({
+      type: [
+        'application/vnd.ms-excel',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      ],
+      limit: '8mb',
+    }),
+  );
 
   app.use((req, res, next) => {
     const started = Date.now();

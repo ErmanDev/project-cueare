@@ -184,7 +184,7 @@ export function AdminEvents() {
   )
 }
 
-function EventForm({
+export function EventForm({
   existing,
   onClose,
   onSaved,

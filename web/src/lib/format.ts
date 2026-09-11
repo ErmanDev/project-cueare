@@ -85,3 +85,19 @@ export function minutes(hhmm: string): number {
 export function initial(name: string): string {
   return name.trim() ? name.trim()[0]!.toUpperCase() : '?'
 }
+
+export function fmtYearLevel(level: number | null | undefined): string {
+  if (level == null || !Number.isFinite(level)) return '—'
+  const teens = level % 100
+  const suffix =
+    teens >= 11 && teens <= 13
+      ? 'th'
+      : level % 10 === 1
+        ? 'st'
+        : level % 10 === 2
+          ? 'nd'
+          : level % 10 === 3
+            ? 'rd'
+            : 'th'
+  return `${level}${suffix} Year`
+}

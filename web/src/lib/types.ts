@@ -11,10 +11,22 @@ export type User = {
 export type Student = {
   id: number
   student_id_code: string
+  first_name?: string | null
+  middle_name?: string | null
+  last_name?: string | null
   full_name: string
+  course?: string | null
+  year_level?: number | null
   section: string | null
   photo_url: string | null
   qr_payload?: string | null
+}
+
+export type StudentPage = {
+  students: Student[]
+  total: number
+  page: number
+  per_page: number
 }
 
 export type SessionWindow = {
@@ -49,7 +61,12 @@ export type AttendanceLog = {
   status: 'confirmed' | 'cancelled'
   device_note: string | null
   student_id_code?: string | null
+  first_name?: string | null
+  middle_name?: string | null
+  last_name?: string | null
   student_name?: string | null
+  course?: string | null
+  year_level?: number | null
   student_section?: string | null
   session_label?: string | null
   scanned_by_name?: string | null

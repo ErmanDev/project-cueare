@@ -73,7 +73,7 @@ class _StudentsScreenState extends ConsumerState<StudentsScreen> {
         title: const Text('Students'),
         actions: [
           IconButton(
-            tooltip: 'Bulk import (CSV)',
+            tooltip: 'Bulk import (Excel / CSV)',
             icon: const Icon(Icons.upload_file),
             onPressed: () => _open(const BulkImportScreen()),
           ),

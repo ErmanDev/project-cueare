@@ -5,9 +5,10 @@ import { hashPassword } from '../auth/password.ts';
 import * as q from '../db/queries.ts';
 import { getPool } from '../db/pool.ts';
 import { withTransaction } from '../db/pool.ts';
-import { DIRECTION, SCAN_STATUS } from '../types.ts';
+import { DIRECTION, SCAN_STATUS, type StudentRow } from '../types.ts';
 import { badRequest, conflict, notFound } from '../utils/errors.ts';
-import { encodeCsv, parseCsv } from '../utils/csv.ts';
+import { mapImportRow, rowsFromSpreadsheet } from '../students/roster.ts';
+import { detectDelimiter, encodeCsv, parseCsv } from '../utils/csv.ts';
 import {
   hasKey,
   jsonObject,
@@ -43,9 +44,31 @@ export const adminRouter = Router();
 adminRouter.get(
   '/students',
   asyncHandler(async (req, res) => {
-    const rows = await q.listStudents(getPool(), queryString(req, 'q'));
+    const search = queryString(req, 'q');
+    const pageRaw = queryInt(req, 'page');
+    const perPageRaw = queryInt(req, 'per_page');
     const svc = service(req);
-    res.json(rows.map((s) => ({ ...studentToApi(s), qr_payload: svc.qrPayloadFor(s) })));
+    const toApi = (s: StudentRow) => ({ ...studentToApi(s), qr_payload: svc.qrPayloadFor(s) });
+
+    if (pageRaw == null && perPageRaw == null) {
+      const rows = await q.listStudents(getPool(), search);
+      res.json(rows.map(toApi));
+      return;
+    }
+
+    const page = Math.max(1, pageRaw ?? 1);
+    const perPage = Math.min(100, Math.max(1, perPageRaw ?? 10));
+    const { rows, total } = await q.listStudentsPage(getPool(), {
+      search,
+      limit: perPage,
+      offset: (page - 1) * perPage,
+    });
+    res.json({
+      students: rows.map(toApi),
+      total,
+      page,
+      per_page: perPage,
+    });
   }),
 );
 
@@ -77,22 +100,7 @@ adminRouter.post(
   '/students/import',
   asyncHandler(async (req, res) => {
     const skipExisting = queryString(req, 'mode') === 'skip';
-    const contentType = req.headers['content-type'] ?? '';
-    let incoming: Record<string, unknown>[];
-    if (contentType.includes('text/csv') || contentType.includes('text/plain')) {
-      incoming = fromCsv(typeof req.body === 'string' ? req.body : String(req.body ?? ''));
-    } else {
-      const body = jsonObject(req);
-      if (typeof body.csv === 'string') {
-        incoming = fromCsv(body.csv);
-      } else if (Array.isArray(body.students)) {
-        incoming = body.students.filter(
-          (m): m is Record<string, unknown> => !!m && typeof m === 'object' && !Array.isArray(m),
-        );
-      } else {
-        throw badRequest('Provide "csv" text or a "students" array');
-      }
-    }
+    const incoming = incomingStudentRows(req);
 
     let created = 0;
     let updated = 0;
@@ -101,40 +109,23 @@ adminRouter.post(
 
     await withTransaction(getPool(), async (client) => {
       for (let i = 0; i < incoming.length; i++) {
-        const row = incoming[i];
-        const code = String(row.student_id_code ?? row.code ?? '').trim();
-        const name = String(row.full_name ?? row.name ?? '').trim();
-        const section = nullable(row.section);
-        const photoUrl = nullable(row.photo_url);
-        if (!code || !name) {
-          errors.push({ row: i + 1, error: 'missing student_id_code or full_name' });
+        const mapped = mapImportRow(incoming[i]);
+        if (!mapped.ok) {
+          errors.push({ row: i + 1, error: mapped.error });
           continue;
         }
-        if (!isValidStudentCode(code)) {
-          errors.push({ row: i + 1, error: 'invalid student_id_code', student_id_code: code });
+        if (!isValidStudentCode(mapped.row.studentIdCode)) {
+          errors.push({
+            row: i + 1,
+            error: 'invalid StudentID',
+            student_id_code: mapped.row.studentIdCode,
+          });
           continue;
         }
-        const existing = await q.getStudentByCode(client, code);
-        if (!existing) {
-          await q.insertStudent(client, {
-            studentIdCode: code,
-            fullName: name,
-            section,
-            photoUrl,
-          });
-          created++;
-        } else if (skipExisting) {
-          skipped++;
-        } else {
-          await q.updateStudent(client, existing.id, {
-            fullName: name,
-            hasSection: true,
-            section: section ?? existing.section,
-            hasPhoto: true,
-            photoUrl: photoUrl ?? existing.photo_url,
-          });
-          updated++;
-        }
+        const status = await q.upsertImportedStudent(client, mapped.row, skipExisting);
+        if (status === 'created') created++;
+        else if (status === 'updated') updated++;
+        else skipped++;
       }
     });
 
@@ -687,18 +678,43 @@ adminRouter.delete(
   }),
 );
 
-function nullable(v: unknown): string | null {
-  if (v == null) return null;
-  const s = String(v).trim();
-  return s ? s : null;
+function incomingStudentRows(req: Request): Record<string, unknown>[] {
+  const contentType = req.headers['content-type'] ?? '';
+  if (Buffer.isBuffer(req.body)) {
+    return rowsFromSpreadsheet(req.body);
+  }
+  if (contentType.includes('text/csv') || contentType.includes('text/plain')) {
+    return fromCsv(typeof req.body === 'string' ? req.body : String(req.body ?? ''));
+  }
+  const body = jsonObject(req);
+  if (typeof body.spreadsheet === 'string') {
+    return rowsFromSpreadsheet(Buffer.from(body.spreadsheet, 'base64'));
+  }
+  if (typeof body.csv === 'string') {
+    return fromCsv(body.csv);
+  }
+  if (Array.isArray(body.students)) {
+    return body.students.filter(
+      (m): m is Record<string, unknown> => !!m && typeof m === 'object' && !Array.isArray(m),
+    );
+  }
+  throw badRequest('Provide csv text, a students array, or a spreadsheet file');
 }
 
 function fromCsv(text: string): Record<string, unknown>[] {
-  const rows = parseCsv(text);
+  const rows = parseCsv(text, detectDelimiter(text));
   if (rows.length === 0) return [];
-  const first = rows[0].map((h) => h.trim().toLowerCase().replaceAll(' ', '_'));
-  const knownHeaders = new Set(['student_id_code', 'code', 'full_name', 'name']);
-  const hasHeader = first.some((h) => knownHeaders.has(h));
+  const first = rows[0].map((h) => h.replace(/^\uFEFF/, '').trim());
+  const knownHeaders = new Set([
+    'studentid',
+    'studentidcode',
+    'code',
+    'fname',
+    'lname',
+    'fullname',
+    'name',
+  ]);
+  const hasHeader = first.some((h) => knownHeaders.has(h.toLowerCase().replace(/[\s_-]+/g, '')));
   const positional = ['student_id_code', 'full_name', 'section', 'photo_url'];
   const headers = hasHeader ? first : positional;
   const dataRows = hasHeader ? rows.slice(1) : rows;

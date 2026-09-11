@@ -47,7 +47,7 @@ async function request<T>(
   const headers = new Headers(init.headers)
   const token = getToken()
   if (token) headers.set('Authorization', `Bearer ${token}`)
-  if (init.body && !headers.has('Content-Type')) {
+  if (init.body && !headers.has('Content-Type') && typeof init.body === 'string') {
     headers.set('Content-Type', 'application/json')
   }
   const res = await fetch(`/api${path}${qs(query)}`, { ...init, headers })
@@ -74,6 +74,8 @@ export const api = {
   get: <T>(path: string, query?: Query) => request<T>(path, { method: 'GET' }, query),
   post: <T>(path: string, body?: unknown, query?: Query) =>
     request<T>(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) }, query),
+  postRaw: <T>(path: string, body: BodyInit, contentType: string, query?: Query) =>
+    request<T>(path, { method: 'POST', body, headers: { 'Content-Type': contentType } }, query),
   put: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'PUT', body: JSON.stringify(body) }),
   delete: (path: string, query?: Query) =>

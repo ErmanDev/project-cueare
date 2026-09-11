@@ -1,3 +1,4 @@
+import { titleCaseName } from '../students/roster.ts';
 import { isPastDate } from './time.ts';
 
 export function toIso(value: Date | string | null | undefined): string | null {
@@ -27,16 +28,33 @@ export function userToApi(row: {
 export function studentToApi(row: {
   id: number;
   student_id_code: string;
+  first_name?: string | null;
+  middle_name?: string | null;
+  last_name?: string | null;
   full_name: string;
+  course?: string | null;
+  year_level?: number | string | null;
   section: string | null;
   photo_url: string | null;
   created_at: Date;
   updated_at: Date;
 }): Record<string, unknown> {
+  const firstName = titleCaseName(row.first_name);
+  const middleName = titleCaseName(row.middle_name) || null;
+  const lastName = titleCaseName(row.last_name);
+  const fullName =
+    [firstName, middleName, lastName].filter(Boolean).join(' ') || titleCaseName(row.full_name);
+  const yearLevel =
+    row.year_level == null || row.year_level === '' ? null : Number(row.year_level);
   return {
     id: row.id,
     student_id_code: row.student_id_code,
-    full_name: row.full_name,
+    first_name: firstName || null,
+    middle_name: middleName,
+    last_name: lastName || null,
+    full_name: fullName,
+    course: row.course ? String(row.course).toUpperCase() : null,
+    year_level: Number.isFinite(yearLevel) ? yearLevel : null,
     section: row.section,
     photo_url: row.photo_url,
     created_at: toIso(row.created_at),
@@ -114,10 +132,22 @@ export function attendanceToApi(row: {
 }
 
 export function attendanceDetailToApi(row: AttendanceDetailRow): Record<string, unknown> {
+  const firstName = titleCaseName(row.first_name);
+  const middleName = titleCaseName(row.middle_name) || null;
+  const lastName = titleCaseName(row.last_name);
+  const fullName =
+    [firstName, middleName, lastName].filter(Boolean).join(' ') || titleCaseName(row.student_name);
+  const yearLevel =
+    row.year_level == null || row.year_level === '' ? null : Number(row.year_level);
   return {
     ...attendanceToApi(row),
     student_id_code: row.student_id_code,
-    student_name: row.student_name,
+    first_name: firstName || null,
+    middle_name: middleName,
+    last_name: lastName || null,
+    student_name: fullName || null,
+    course: row.course ? String(row.course).toUpperCase() : null,
+    year_level: Number.isFinite(yearLevel) ? yearLevel : null,
     student_section: row.student_section,
     session_label: row.session_label,
     scanned_by_name: row.scanned_by_name,
@@ -137,7 +167,12 @@ export type AttendanceDetailRow = {
   device_note: string | null;
   updated_at: Date;
   student_id_code: string | null;
+  first_name?: string | null;
+  middle_name?: string | null;
+  last_name?: string | null;
   student_name: string | null;
+  course?: string | null;
+  year_level?: number | string | null;
   student_section: string | null;
   session_label: string | null;
   scanned_by_name: string | null;

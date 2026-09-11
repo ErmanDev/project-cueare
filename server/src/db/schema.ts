@@ -440,12 +440,107 @@ async function columnExists(db: Queryable, table: string, column: string): Promi
   return (res.rowCount ?? 0) > 0;
 }
 
+async function addColumnIfMissing(
+  db: Queryable,
+  table: string,
+  column: string,
+  spec: string,
+): Promise<void> {
+  if (!(await relationExists(db, q(table)))) return;
+  if (await columnExists(db, table, column)) return;
+  await db.query(`ALTER TABLE ${q(table)} ADD COLUMN ${spec}`);
+}
+
+/** Columns the Express app needs that the hardened SQL install may omit. */
+export async function addMissingAppColumns(db: Queryable): Promise<void> {
+  await addColumnIfMissing(db, 'Users', 'username', 'username varchar(100)');
+  await addColumnIfMissing(db, 'Users', 'passwordHash', `${q('passwordHash')} text`);
+  await addColumnIfMissing(db, 'Users', 'role', 'role varchar(20)');
+  await addColumnIfMissing(
+    db,
+    'Users',
+    'updatedAtUtc',
+    `${q('updatedAtUtc')} timestamptz(3) NOT NULL DEFAULT clock_timestamp()`,
+  );
+  if (await columnExists(db, 'Users', 'externalSubject')) {
+    await db.query(
+      `ALTER TABLE ${q('Users')} ALTER COLUMN ${q('externalSubject')} DROP NOT NULL`,
+    );
+  }
+
+  await addColumnIfMissing(db, 'Students', 'userId', `${q('userId')} integer NULL`);
+  await addColumnIfMissing(db, 'Students', 'photoUrl', `${q('photoUrl')} text NULL`);
+  await addColumnIfMissing(
+    db,
+    'Students',
+    'updatedAtUtc',
+    `${q('updatedAtUtc')} timestamptz(3) NOT NULL DEFAULT clock_timestamp()`,
+  );
+
+  await addColumnIfMissing(db, 'Events', 'eventDate', `${q('eventDate')} date`);
+  await addColumnIfMissing(
+    db,
+    'Events',
+    'updatedAtUtc',
+    `${q('updatedAtUtc')} timestamptz(3) NOT NULL DEFAULT clock_timestamp()`,
+  );
+  await addColumnIfMissing(db, 'Events', 'description', 'description varchar(2000) NULL');
+  await addColumnIfMissing(db, 'Events', 'venue', 'venue varchar(300) NULL');
+
+  await addColumnIfMissing(
+    db,
+    'EventSessions',
+    'sortOrder',
+    `${q('sortOrder')} integer NOT NULL DEFAULT 0`,
+  );
+
+  await addColumnIfMissing(
+    db,
+    'EventParticipants',
+    'academicTermId',
+    `${q('academicTermId')} bigint`,
+  );
+  await addColumnIfMissing(
+    db,
+    'EventParticipants',
+    'studentEnrollmentId',
+    `${q('studentEnrollmentId')} bigint`,
+  );
+
+  await addColumnIfMissing(
+    db,
+    'AttendanceLogs',
+    'isCancelled',
+    `${q('isCancelled')} boolean NOT NULL DEFAULT false`,
+  );
+  await addColumnIfMissing(
+    db,
+    'AttendanceLogs',
+    'deviceNote',
+    `${q('deviceNote')} varchar(200) NULL`,
+  );
+  await addColumnIfMissing(
+    db,
+    'AttendanceLogs',
+    'recordedAtUtc',
+    `${q('recordedAtUtc')} timestamptz(3) NOT NULL DEFAULT clock_timestamp()`,
+  );
+  await addColumnIfMissing(
+    db,
+    'AttendanceLogs',
+    'attendanceCorrectionId',
+    `${q('attendanceCorrectionId')} bigint NULL`,
+  );
+}
+
 async function ignoreDuplicate(db: Queryable, sql: string): Promise<void> {
   try {
     await db.query(sql);
   } catch (e: unknown) {
     const code = e && typeof e === 'object' && 'code' in e ? String((e as { code: unknown }).code) : '';
-    if (code === '42710' || code === '42P07') return;
+    // 42710/42P07: constraint/index already exists
+    // 42703: hardened tables omit app-only key columns (e.g. EventSessions.academicTermId)
+    if (code === '42710' || code === '42P07' || code === '42703') return;
     throw e;
   }
 }
@@ -648,6 +743,12 @@ export async function addMissingConstraints(db: Queryable): Promise<void> {
       `ALTER TABLE ${q('Users')} ADD CONSTRAINT ck_users_role CHECK (role IN ('superadmin', 'moderator', 'student'))`,
     );
   }
+  if (await columnExists(db, 'Users', 'username')) {
+    await ignoreDuplicate(
+      db,
+      `ALTER TABLE ${q('Users')} ADD CONSTRAINT uq_users_username UNIQUE (username)`,
+    );
+  }
   await ignoreDuplicate(
     db,
     `ALTER TABLE ${q('AuthProviders')} ADD CONSTRAINT uq_auth_providers_code UNIQUE (${q('providerCode')})`,
@@ -694,11 +795,20 @@ export async function addMissingConstraints(db: Queryable): Promise<void> {
     `ALTER TABLE ${q('Sections')} ADD CONSTRAINT uq_sections_context
      UNIQUE (${q('academicTermId')}, ${q('academicProgramId')}, ${q('yearLevel')}, ${q('sectionId')})`,
   );
-  await ignoreDuplicate(
-    db,
-    `ALTER TABLE ${q('Sections')} ADD CONSTRAINT uq_sections_code
-     UNIQUE (${q('academicTermId')}, ${q('academicProgramId')}, ${q('sectionCode')})`,
+  const duplicateSectionCodes = await db.query(
+    `SELECT 1 FROM (
+        SELECT 1 FROM ${q('Sections')}
+        GROUP BY ${q('academicTermId')}, ${q('academicProgramId')}, ${q('sectionCode')}
+        HAVING COUNT(*) > 1
+     ) d LIMIT 1`,
   );
+  if ((duplicateSectionCodes.rowCount ?? 0) === 0) {
+    await ignoreDuplicate(
+      db,
+      `ALTER TABLE ${q('Sections')} ADD CONSTRAINT uq_sections_code
+       UNIQUE (${q('academicTermId')}, ${q('academicProgramId')}, ${q('sectionCode')})`,
+    );
+  }
   await ignoreDuplicate(
     db,
     `ALTER TABLE ${q('Sections')} ADD CONSTRAINT fk_sections_term

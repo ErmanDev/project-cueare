@@ -356,13 +356,60 @@ p {
   border-top: 1px solid color-mix(in srgb, var(--outline-variant) 60%, transparent);
 }
 
-.filters {
-  margin-bottom: 16px;
+.pager-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.pager-bar p {
+  margin: 0;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pager-btn {
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--navy) 16%, var(--outline-variant));
+  border-radius: 8px;
+  background: var(--surface-lowest);
+  color: var(--navy);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+
+.pager-btn:hover:not(:disabled) {
   background: var(--surface-low);
 }
 
-.filters-status {
-  margin-top: 14px;
+.pager-btn.is-current {
+  background: var(--navy);
+  color: var(--on-primary);
+  border-color: var(--navy);
+}
+
+.pager-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.pager-ellipsis {
+  min-width: 20px;
+  text-align: center;
+  color: var(--on-surface-variant);
+  font-size: 13px;
 }
 
 .card-click {
@@ -580,6 +627,147 @@ p {
   resize: vertical;
   font-family: ui-monospace, Consolas, monospace;
   font-size: 13px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.file-pick {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.file-pick-well {
+  grid-column: 1;
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 14px;
+  margin: 0;
+  padding: 14px 16px;
+  text-align: left;
+  cursor: pointer;
+  background: var(--surface-low);
+  border: 1px solid color-mix(in srgb, var(--navy) 16%, var(--outline-variant));
+  border-radius: var(--radius);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow) 35%, transparent);
+  transition:
+    background 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.file-pick-well:hover:not(:disabled) {
+  background: var(--surface-container);
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--outline-variant));
+}
+
+.file-pick-well:active:not(:disabled) {
+  background: var(--surface-high);
+}
+
+.file-pick.is-over .file-pick-well {
+  background: color-mix(in srgb, var(--primary) 10%, var(--surface-low));
+  border-color: var(--primary);
+}
+
+.file-pick.is-filled .file-pick-well {
+  background: var(--surface-lowest);
+}
+
+.file-pick-well:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.file-pick-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.file-pick-copy strong {
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--on-surface);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-pick-copy span {
+  color: var(--on-surface-variant);
+  font-size: 13px;
+}
+
+.file-pick-cta {
+  margin-left: auto;
+  pointer-events: none;
+}
+
+.file-pick-clear {
+  color: var(--on-surface-variant);
+}
+
+@media (max-width: 520px) {
+  .file-pick {
+    grid-template-columns: 1fr;
+  }
+
+  .file-pick-cta {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .file-pick-clear {
+    justify-self: end;
+  }
+}
+
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.filter-bar .search {
+  flex: 1 1 220px;
+  margin-bottom: 0;
+}
+
+.filter-control {
+  min-height: 44px;
+  min-width: 148px;
+  padding: 0 12px;
+  background: var(--surface-lowest);
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius);
+  color: var(--on-surface);
+}
+
+.filter-control:disabled {
+  opacity: 0.5;
+}
+
+.filter-bar .segmented {
+  min-height: 44px;
+  align-items: center;
 }
 
 .search {
@@ -1129,6 +1317,14 @@ table.data .windows {
 
 table.events-table {
   min-width: 760px;
+}
+
+table.students-table {
+  min-width: 920px;
+}
+
+table.attendance-table {
+  min-width: 1180px;
 }
 
 table.events-table td:last-child {
