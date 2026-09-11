@@ -8,7 +8,7 @@ import { createHttpGuards, type ServerRuntime } from './infra/httpGuards.ts';
 import { ScanWriteQueue } from './infra/queue.ts';
 import { apiInfo, mountRestApi } from './routes/index.ts';
 import { mountSwagger } from './swagger/ui.ts';
-import { ApiError } from './utils/errors.ts';
+import { ApiError, fromPgBusinessRule } from './utils/errors.ts';
 import { mountWebApp, resolveWebDist } from './web.ts';
 
 const CORS_HEADERS = {
@@ -93,6 +93,11 @@ export function createApp(service?: AttendanceService): Express {
         res.setHeader('Retry-After', String(retry));
       }
       res.status(err.statusCode).json(err.toBody());
+      return;
+    }
+    const pgRule = fromPgBusinessRule(err);
+    if (pgRule) {
+      res.status(pgRule.statusCode).json(pgRule.toBody());
       return;
     }
     console.error('Unhandled error:', err);

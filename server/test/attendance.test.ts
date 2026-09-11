@@ -114,6 +114,7 @@ describe('AttendanceService', () => {
     morningId = morning.id;
     afternoonId = afternoon.id;
     studentId = student.id;
+    await q.publishEvent(pool, event.id, admin.id);
   });
 
   it('skips when Postgres is unavailable', () => {

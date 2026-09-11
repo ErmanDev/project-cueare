@@ -61,3 +61,23 @@ export function isPgUniqueViolation(err: unknown): boolean {
       (err as { code: unknown }).code === '23505',
   );
 }
+
+function pgCode(err: unknown): string | null {
+  if (!err || typeof err !== 'object' || !('code' in err)) return null;
+  return String((err as { code: unknown }).code);
+}
+
+/** Hardened schema RAISE EXCEPTION codes (event lifecycle, roster, etc.). */
+export function isPgBusinessRule(err: unknown): boolean {
+  const code = pgCode(err);
+  return Boolean(code && /^[0-9]{5}$/.test(code) && code.startsWith('52'));
+}
+
+export function pgErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+export function fromPgBusinessRule(err: unknown): ApiError | null {
+  if (!isPgBusinessRule(err)) return null;
+  return badRequest(pgErrorMessage(err), { code: pgCode(err) ?? undefined });
+}

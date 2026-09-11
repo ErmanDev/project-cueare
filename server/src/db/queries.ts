@@ -1,5 +1,5 @@
 import type { AttendanceDetailRow } from '../utils/serialize.ts';
-import { conflict, isPgUniqueViolation } from '../utils/errors.ts';
+import { conflict, isPgBusinessRule, isPgUniqueViolation, pgErrorMessage } from '../utils/errors.ts';
 import { parseMinutes, startOfDay } from '../utils/time.ts';
 import { PROGRAM_NAMES, type MappedImportStudent } from '../students/roster.ts';
 import { escapeLike } from '../utils/studentCode.ts';
@@ -763,6 +763,74 @@ async function eventTermId(db: Queryable, eventId: number): Promise<number> {
   return row.academic_term_id;
 }
 
+async function eventStatusCode(db: Queryable, eventId: number): Promise<string> {
+  const row = await one<{ status: string }>(
+    db,
+    `SELECT ${q('eventStatusCode')} AS status FROM ${q('Events')} WHERE ${q('eventId')} = $1`,
+    [eventId],
+  );
+  if (!row) throw new Error('Event not found');
+  return row.status;
+}
+
+export async function ensureEventRoster(
+  db: Queryable,
+  eventId: number,
+  actorUserId: number,
+): Promise<void> {
+  const students = await many<{ student_id: number }>(
+    db,
+    `SELECT ${q('studentId')} AS student_id FROM ${q('Students')} WHERE ${q('isActive')} = true`,
+  );
+  for (const student of students) {
+    await getOrCreateEnrollment(db, student.student_id);
+  }
+  await db.query(
+    `INSERT INTO ${q('EventParticipants')} (
+        ${q('eventSessionId')}, ${q('academicTermId')}, ${q('studentEnrollmentId')},
+        ${q('studentId')}, ${q('addedByUserId')}
+     )
+     SELECT es.${q('eventSessionId')}, COALESCE(es.${q('academicTermId')}, e.${q('academicTermId')}),
+            se.${q('studentEnrollmentId')}, se.${q('studentId')}, $2
+     FROM ${q('EventSessions')} es
+     JOIN ${q('Events')} e ON e.${q('eventId')} = es.${q('eventId')}
+     JOIN ${q('StudentEnrollments')} se
+       ON se.${q('academicTermId')} = e.${q('academicTermId')}
+      AND se.${q('effectiveToUtc')} IS NULL
+      AND se.${q('enrollmentStatusCode')} = 'ENROLLED'
+     WHERE es.${q('eventId')} = $1
+     ON CONFLICT (${q('eventSessionId')}, ${q('studentId')}) DO NOTHING`,
+    [eventId, actorUserId],
+  );
+}
+
+export async function publishEvent(
+  db: Queryable,
+  eventId: number,
+  actorUserId: number,
+): Promise<EventRow> {
+  const status = await eventStatusCode(db, eventId);
+  if (status === 'PUBLISHED') return (await getEventById(db, eventId))!;
+  if (status !== 'DRAFT') {
+    throw conflict('Closed or cancelled events cannot be reactivated. Create a new event.');
+  }
+  await ensureEventRoster(db, eventId, actorUserId);
+  try {
+    await db.query(
+      `UPDATE ${q('Events')}
+       SET ${q('eventStatusCode')} = 'PUBLISHED', ${q('updatedAtUtc')} = clock_timestamp()
+       WHERE ${q('eventId')} = $1 AND ${q('eventStatusCode')} = 'DRAFT'`,
+      [eventId],
+    );
+  } catch (err) {
+    if (isPgBusinessRule(err) && /publish requires/i.test(pgErrorMessage(err))) {
+      return (await getEventById(db, eventId))!;
+    }
+    throw err;
+  }
+  return (await getEventById(db, eventId))!;
+}
+
 export async function insertEvent(
   db: Queryable,
   row: { name: string; eventDate: Date; isActive: boolean; createdBy: number },
@@ -776,14 +844,7 @@ export async function insertEvent(
         ${q('eventStatusCode')}, ${q('createdByUserId')}
      ) VALUES ($1, $2, $3, $4::date, $5, $6)
      RETURNING ${q('eventId')} AS event_id`,
-    [
-      term,
-      code.slice(0, 50),
-      row.name,
-      row.eventDate,
-      row.isActive ? 'PUBLISHED' : 'CLOSED',
-      row.createdBy,
-    ],
+    [term, code.slice(0, 50), row.name, row.eventDate, 'DRAFT', row.createdBy],
   );
   return (await getEventById(db, created!.event_id))!;
 }
@@ -805,12 +866,10 @@ export async function updateEvent(
     sets.push(`${q('eventDate')} = $${i++}::date`);
     values.push(fields.eventDate);
   }
-  if (fields.isActive != null) {
-    sets.push(`${q('eventStatusCode')} = $${i++}`);
-    values.push(fields.isActive ? 'PUBLISHED' : 'CLOSED');
+  if (sets.length > 1) {
+    values.push(id);
+    await db.query(`UPDATE ${q('Events')} SET ${sets.join(', ')} WHERE ${q('eventId')} = $${i}`, values);
   }
-  values.push(id);
-  await db.query(`UPDATE ${q('Events')} SET ${sets.join(', ')} WHERE ${q('eventId')} = $${i}`, values);
 
   if (fields.eventDate != null) {
     const windows = await windowsForEvent(db, id);
@@ -822,6 +881,14 @@ export async function updateEvent(
     }
   }
 
+  if (fields.isActive === true) {
+    return publishEvent(db, id, existing.created_by);
+  }
+  if (fields.isActive === false) {
+    const status = await eventStatusCode(db, id);
+    if (status === 'PUBLISHED') await deactivateEvent(db, id);
+  }
+
   return (await getEventById(db, id)) ?? existing;
 }
 
@@ -830,6 +897,10 @@ export async function deleteEvent(db: Queryable, id: number): Promise<void> {
 }
 
 export async function deactivateEvent(db: Queryable, id: number): Promise<void> {
+  await db.query(
+    `UPDATE ${q('EventSessions')} SET ${q('isClosed')} = TRUE WHERE ${q('eventId')} = $1`,
+    [id],
+  );
   await db.query(
     `UPDATE ${q('Events')}
      SET ${q('eventStatusCode')} = 'CLOSED', ${q('updatedAtUtc')} = clock_timestamp()
@@ -917,8 +988,9 @@ export async function insertWindow(
     `INSERT INTO ${q('EventSessions')} (
         ${q('eventId')}, ${q('academicTermId')}, ${q('sessionCode')}, ${q('sessionName')},
         ${q('startsAtUtc')}, ${q('endsAtUtc')}, ${q('checkInOpensAtUtc')}, ${q('checkInClosesAtUtc')},
-        ${q('lateAfterUtc')}, ${q('checkOutOpensAtUtc')}, ${q('checkOutClosesAtUtc')}, ${q('sortOrder')}
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+        ${q('lateAfterUtc')}, ${q('checkOutOpensAtUtc')}, ${q('checkOutClosesAtUtc')},
+        ${q('requiresCheckOut')}, ${q('sortOrder')}
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,true,$12)
      RETURNING ${q('eventSessionId')} AS event_session_id`,
     [
       row.eventId,

@@ -264,6 +264,9 @@ adminRouter.post(
           });
         }
       }
+      if (isActive) {
+        await q.publishEvent(client, event.id, req.auth!.id);
+      }
       const windows = await q.windowsForEvent(client, event.id);
       const refreshed = (await q.getEventById(client, event.id))!;
       return {

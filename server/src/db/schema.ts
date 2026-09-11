@@ -493,6 +493,12 @@ export async function addMissingAppColumns(db: Queryable): Promise<void> {
     'sortOrder',
     `${q('sortOrder')} integer NOT NULL DEFAULT 0`,
   );
+  await addColumnIfMissing(
+    db,
+    'EventSessions',
+    'academicTermId',
+    `${q('academicTermId')} bigint`,
+  );
 
   await addColumnIfMissing(
     db,
