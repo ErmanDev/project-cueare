@@ -24,6 +24,10 @@ function health(_req: Request, res: Response): void {
   res.json({ status: 'ok', server_time: new Date().toISOString() });
 }
 
+import { asyncHandler } from './auth.ts';
+import { getPool } from '../db/pool.ts';
+import { listFineTemplates } from '../db/queries.ts';
+
 /** Auth, admin, moderator, and student REST handlers under `prefix`. */
 export function mountRestApi(app: Express, prefix = ''): void {
   const p = prefix.replace(/\/$/, '');
@@ -35,6 +39,15 @@ export function mountRestApi(app: Express, prefix = ''): void {
   app.get(`${p}/health`, health);
   app.post(`${p}/auth/login`, authRouter.login);
   app.get(`${p}/auth/me`, ...authRouter.me);
+
+  // Anonymous fine templates endpoint
+  app.get(
+    [`${p}/fine-templates`, `${p}/admin/fine-templates`],
+    asyncHandler(async (_req, res) => {
+      const templates = await listFineTemplates(getPool());
+      res.json(templates);
+    }),
+  );
 
   app.use(`${p}/admin`, requireAuth(new Set([ROLES.superadmin])), adminRouter);
   app.use(`${p}/moderator`, requireAuth(new Set([ROLES.moderator])), moderatorRouter);

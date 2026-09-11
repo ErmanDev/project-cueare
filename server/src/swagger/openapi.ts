@@ -30,6 +30,9 @@ export const openApiDocument = {
     { name: 'Auth' },
     { name: 'Admin — Students' },
     { name: 'Admin — Events' },
+    { name: 'Admin — Composite Events' },
+    { name: 'Admin — Fine Policies' },
+    { name: 'Admin — Fine Settlements' },
     { name: 'Admin — Moderators' },
     { name: 'Admin — Attendance' },
     { name: 'Moderator' },
@@ -731,6 +734,549 @@ export const openApiDocument = {
             description: 'HAS_RECORDS',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
           },
+        },
+      },
+    },
+    '/admin/fine-templates': {
+      get: {
+        tags: ['Admin — Fine Policies'],
+        summary: 'List fine policy templates (Public / Anonymous)',
+        description: 'Fetch reusable fine policy templates and published version rules (Public / Anonymous)',
+        responses: {
+          '200': {
+            description: 'List of fine policy templates',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      template_id: { type: 'integer' },
+                      template_code: { type: 'string' },
+                      template_name: { type: 'string' },
+                      description: { type: 'string', nullable: true },
+                      is_active: { type: 'boolean' },
+                      active_version: {
+                        type: 'object',
+                        nullable: true,
+                        properties: {
+                          version_id: { type: 'integer' },
+                          version_number: { type: 'integer' },
+                          currency_code: { type: 'string' },
+                          max_fine_per_student: { type: 'number', nullable: true },
+                          rules: {
+                            type: 'array',
+                            items: {
+                              type: 'object',
+                              properties: {
+                                rule_id: { type: 'integer' },
+                                session_type_code: { type: 'string' },
+                                violation_code: { type: 'string' },
+                                fine_amount: { type: 'number' },
+                                priority_order: { type: 'integer' },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/admin/events/{id}/fine-policy': {
+      parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+      get: {
+        tags: ['Admin — Fine Policies'],
+        summary: 'Get event fine policy & rules matrix',
+        description: 'Retrieve fine policy, session rule matrix, and active overrides for an event',
+        security: bearer,
+        responses: {
+          '200': {
+            description: 'Event fine policy with session rule matrix',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    event_id: { type: 'integer' },
+                    fine_policy: {
+                      type: 'object',
+                      nullable: true,
+                      properties: {
+                        policy_id: { type: 'integer' },
+                        policy_code: { type: 'string' },
+                        policy_name: { type: 'string' },
+                        currency_code: { type: 'string' },
+                        maximum_fine_per_student: { type: 'number', nullable: true },
+                        status: { type: 'string' },
+                      },
+                    },
+                    sessions: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          session_id: { type: 'integer' },
+                          session_code: { type: 'string' },
+                          session_name: { type: 'string' },
+                          session_type_code: { type: 'string' },
+                          rules: {
+                            type: 'array',
+                            items: {
+                              type: 'object',
+                              properties: {
+                                rule_id: { type: 'integer' },
+                                violation_code: { type: 'string' },
+                                base_fine_amount: { type: 'number' },
+                                effective_fine_amount: { type: 'number' },
+                                priority_order: { type: 'integer' },
+                                override: {
+                                  type: 'object',
+                                  nullable: true,
+                                  properties: {
+                                    override_id: { type: 'integer' },
+                                    fine_amount: { type: 'number' },
+                                    override_reason: { type: 'string' },
+                                  },
+                                },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/admin/events/{id}/fine-policy/from-template': {
+      parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+      post: {
+        tags: ['Admin — Fine Policies'],
+        summary: 'Apply fine policy template to event',
+        description: 'Instantiate event fine policy and session rules from a published template version',
+        security: bearer,
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['template_version_id'],
+                properties: {
+                  template_version_id: { type: 'integer' },
+                  policy_code: { type: 'string' },
+                  policy_name: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Fine policy applied',
+          },
+          '400': {
+            description: 'Invalid input',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+        },
+      },
+    },
+    '/admin/events/{id}/fine-policy/rules': {
+      parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+      put: {
+        tags: ['Admin — Fine Policies'],
+        summary: 'Atomic batch upsert event fine rules & overrides',
+        description: 'Update or insert session fine rules and rule overrides in a single transaction',
+        security: bearer,
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['rules'],
+                properties: {
+                  policy_code: { type: 'string' },
+                  policy_name: { type: 'string' },
+                  rules: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      required: ['session_id', 'violation_code', 'fine_amount'],
+                      properties: {
+                        session_id: { type: 'integer' },
+                        violation_code: { type: 'string', example: 'ABSENT' },
+                        fine_amount: { type: 'number', example: 100.00 },
+                        priority_order: { type: 'integer', default: 100 },
+                        override: {
+                          type: 'object',
+                          nullable: true,
+                          properties: {
+                            fine_amount: { type: 'number' },
+                            override_reason: { type: 'string' },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Updated event fine policy & matrix',
+          },
+          '400': {
+            description: 'Invalid input',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+        },
+      },
+    },
+    '/admin/events/composite': {
+      post: {
+        tags: ['Admin — Composite Events'],
+        summary: 'Create composite event with sessions, audience rules, and fine policy',
+        description: 'Atomic creation of an entire event, its sessions, audience criteria, and fine policy rules in one transaction.',
+        security: bearer,
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['event_code', 'event_name'],
+                properties: {
+                  event_code: { type: 'string', example: 'EVT-ACQUAINTANCE-2026' },
+                  event_name: { type: 'string', example: 'Acquaintance Party 2026' },
+                  academic_term_id: { type: 'integer' },
+                  event_date: { type: 'string', format: 'date' },
+                  sessions: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      required: ['session_code', 'session_name', 'starts_at_utc', 'ends_at_utc', 'check_in_opens_at_utc', 'check_in_closes_at_utc', 'late_after_utc'],
+                      properties: {
+                        session_code: { type: 'string', example: 'SESS-AM' },
+                        session_name: { type: 'string', example: 'Morning Plenary' },
+                        session_type_code: { type: 'string', example: 'AM' },
+                        starts_at_utc: { type: 'string', format: 'date-time' },
+                        ends_at_utc: { type: 'string', format: 'date-time' },
+                        check_in_opens_at_utc: { type: 'string', format: 'date-time' },
+                        check_in_closes_at_utc: { type: 'string', format: 'date-time' },
+                        late_after_utc: { type: 'string', format: 'date-time' },
+                        check_out_opens_at_utc: { type: 'string', format: 'date-time', nullable: true },
+                        check_out_closes_at_utc: { type: 'string', format: 'date-time', nullable: true },
+                        requires_check_out: { type: 'boolean', default: false },
+                        minimum_minutes: { type: 'integer', default: 0 },
+                      },
+                    },
+                  },
+                  audience_rules: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      required: ['audience_scope_code'],
+                      properties: {
+                        audience_scope_code: { type: 'string', enum: ['ALL_STUDENTS', 'PROGRAM', 'YEAR_LEVEL', 'SECTION', 'STUDENT'] },
+                        academic_program_id: { type: 'integer', nullable: true },
+                        section_id: { type: 'integer', nullable: true },
+                        year_level: { type: 'integer', nullable: true },
+                        student_id: { type: 'integer', nullable: true },
+                        is_required: { type: 'boolean', default: true },
+                      },
+                    },
+                  },
+                  fine_policy: {
+                    type: 'object',
+                    properties: {
+                      template_version_id: { type: 'integer', nullable: true },
+                      policy_code: { type: 'string' },
+                      policy_name: { type: 'string' },
+                      maximum_fine_per_student: { type: 'number' },
+                      custom_rules: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          required: ['session_code', 'violation_code', 'fine_amount'],
+                          properties: {
+                            session_code: { type: 'string' },
+                            violation_code: { type: 'string' },
+                            fine_amount: { type: 'number' },
+                            priority_order: { type: 'integer' },
+                            override: {
+                              type: 'object',
+                              nullable: true,
+                              properties: {
+                                fine_amount: { type: 'number' },
+                                override_reason: { type: 'string' },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': { description: 'Composite event created' },
+          '400': { description: 'Invalid input' },
+        },
+      },
+    },
+    '/admin/events/{id}/composite': {
+      parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+      put: {
+        tags: ['Admin — Composite Events'],
+        summary: 'Update composite event with sessions, audience rules, and fine policy',
+        security: bearer,
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['event_code', 'event_name'],
+                properties: {
+                  event_code: { type: 'string' },
+                  event_name: { type: 'string' },
+                  academic_term_id: { type: 'integer' },
+                  event_date: { type: 'string', format: 'date' },
+                  sessions: { type: 'array' },
+                  audience_rules: { type: 'array' },
+                  fine_policy: { type: 'object' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'Composite event updated' },
+        },
+      },
+    },
+    '/admin/events/{id}/publish': {
+      parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+      post: {
+        tags: ['Admin — Composite Events'],
+        summary: 'Publish event & generate participant roster',
+        description: 'Runs `sp_event_roster_generate_from_audience_rules` and sets eventStatusCode to PUBLISHED.',
+        security: bearer,
+        responses: {
+          '200': { description: 'Event published' },
+        },
+      },
+    },
+    '/admin/events/{id}/sessions/{sessionId}/assess-fines': {
+      parameters: [
+        { name: 'id', in: 'path', required: true, schema: { type: 'integer' } },
+        { name: 'sessionId', in: 'path', required: true, schema: { type: 'integer' } },
+      ],
+      post: {
+        tags: ['Admin — Fine Settlements'],
+        summary: 'Close session & execute fine assessment',
+        description: 'Closes session and executes stored procedure `sp_student_fine_assess_closed_session`.',
+        security: bearer,
+        responses: {
+          '200': { description: 'Fines assessed' },
+        },
+      },
+    },
+    '/admin/fine-templates/upsert': {
+      post: {
+        tags: ['Admin — Fine Policies'],
+        summary: 'Upsert fine policy template & rule matrix',
+        description: 'Create or update reusable fine policy template, version, and violation rates.',
+        security: bearer,
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['template_code', 'template_name', 'rules'],
+                properties: {
+                  template_code: { type: 'string', example: 'STANDARD_SCHOOL_EVENT' },
+                  template_name: { type: 'string', example: 'Standard School Event Policy' },
+                  description: { type: 'string' },
+                  version_number: { type: 'integer', default: 1 },
+                  currency_code: { type: 'string', default: 'PHP' },
+                  maximum_fine_per_student: { type: 'number', default: 500.00 },
+                  publish: { type: 'boolean', default: true },
+                  rules: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      required: ['session_type_code', 'violation_code', 'fine_amount'],
+                      properties: {
+                        session_type_code: { type: 'string', example: 'AM' },
+                        violation_code: { type: 'string', example: 'ABSENT' },
+                        fine_amount: { type: 'number', example: 100.00 },
+                        priority_order: { type: 'integer', default: 100 },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': { description: 'Fine template saved' },
+        },
+      },
+    },
+    '/admin/fines/balances': {
+      get: {
+        tags: ['Admin — Fine Settlements'],
+        summary: 'List student fine balances',
+        description: 'Query real-time student fine assessments and outstanding balances from `VwStudentFineBalances`.',
+        security: bearer,
+        parameters: [
+          { name: 'student_id', in: 'query', schema: { type: 'integer' } },
+          { name: 'student_number', in: 'query', schema: { type: 'string' } },
+          { name: 'session_id', in: 'query', schema: { type: 'integer' } },
+          { name: 'violation_code', in: 'query', schema: { type: 'string' } },
+          { name: 'status', in: 'query', schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': { description: 'Student fine balances' },
+        },
+      },
+    },
+    '/admin/fines/payments': {
+      post: {
+        tags: ['Admin — Fine Settlements'],
+        summary: 'Post student fine payment',
+        description: 'Posts a confirmed payment and allocates amounts across fine assessments via `sp_fine_payment_post`.',
+        security: bearer,
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['payment_reference', 'payment_method_code', 'total_amount', 'allocations'],
+                properties: {
+                  payment_reference: { type: 'string', example: 'PAY-2026-0001' },
+                  payment_method_code: { type: 'string', enum: ['CASH', 'GCASH', 'BANK_TRANSFER', 'OTHER'] },
+                  total_amount: { type: 'number', example: 150.00 },
+                  external_payment_reference: { type: 'string', nullable: true },
+                  allocations: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      required: ['assessment_id', 'amount'],
+                      properties: {
+                        assessment_id: { type: 'integer' },
+                        amount: { type: 'number' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': { description: 'Payment recorded' },
+        },
+      },
+    },
+    '/admin/fines/payments/{id}/void': {
+      parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+      post: {
+        tags: ['Admin — Fine Settlements'],
+        summary: 'Void payment',
+        description: 'Voids confirmed payment and rolls back assessment balances via `sp_fine_payment_void`.',
+        security: bearer,
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['void_reason'],
+                properties: {
+                  void_reason: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'Payment voided' },
+        },
+      },
+    },
+    '/admin/fines/waivers': {
+      post: {
+        tags: ['Admin — Fine Settlements'],
+        summary: 'Submit fine waiver request',
+        description: 'Creates a pending waiver request via `sp_fine_waiver_request`.',
+        security: bearer,
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['assessment_id', 'waiver_reason'],
+                properties: {
+                  assessment_id: { type: 'integer' },
+                  waiver_reason: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': { description: 'Waiver requested' },
+        },
+      },
+    },
+    '/admin/fines/waivers/{id}/review': {
+      parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+      post: {
+        tags: ['Admin — Fine Settlements'],
+        summary: 'Review fine waiver request',
+        description: 'Approve or reject pending waiver request via `sp_fine_waiver_review`.',
+        security: bearer,
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['decision', 'review_notes'],
+                properties: {
+                  decision: { type: 'string', enum: ['APPROVED', 'REJECTED'] },
+                  review_notes: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'Waiver decision recorded' },
         },
       },
     },

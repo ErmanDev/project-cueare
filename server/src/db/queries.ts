@@ -1429,3 +1429,798 @@ export async function listAttendance(
     values,
   );
 }
+
+// --- Fine Policy & Rule Engine Queries ---
+
+export async function listFineTemplates(db: Queryable): Promise<any[]> {
+  const templates = await many<{
+    template_id: number;
+    template_code: string;
+    template_name: string;
+    description: string | null;
+    is_active: boolean;
+    version_id: number | null;
+    version_number: number | null;
+    currency_code: string | null;
+    max_fine_per_student: number | null;
+  }>(
+    db,
+    `SELECT 
+       t.${q('finePolicyTemplateId')} AS template_id,
+       t.${q('templateCode')} AS template_code,
+       t.${q('templateName')} AS template_name,
+       t.${q('description')} AS description,
+       t.${q('isActive')} AS is_active,
+       v.${q('finePolicyTemplateVersionId')} AS version_id,
+       v.${q('versionNumber')} AS version_number,
+       v.${q('currencyCode')} AS currency_code,
+       v.${q('maximumFinePerStudent')} AS max_fine_per_student
+     FROM ${q('FinePolicyTemplates')} t
+     LEFT JOIN LATERAL (
+       SELECT * FROM ${q('FinePolicyTemplateVersions')} pv
+       WHERE pv.${q('finePolicyTemplateId')} = t.${q('finePolicyTemplateId')}
+         AND pv.${q('versionStatusCode')} = 'PUBLISHED'
+       ORDER BY pv.${q('versionNumber')} DESC
+       LIMIT 1
+     ) v ON TRUE
+     WHERE t.${q('isActive')} = TRUE
+     ORDER BY t.${q('templateName')}`,
+  );
+
+  const versionIds = templates.map((t) => t.version_id).filter((id): id is number => id != null);
+  const rulesMap = new Map<number, any[]>();
+  if (versionIds.length > 0) {
+    const rules = await many<{
+      rule_id: number;
+      version_id: number;
+      session_type_code: string;
+      violation_code: string;
+      fine_amount: number;
+      priority_order: number;
+    }>(
+      db,
+      `SELECT 
+         ${q('finePolicyTemplateRuleId')} AS rule_id,
+         ${q('finePolicyTemplateVersionId')} AS version_id,
+         ${q('sessionTypeCode')} AS session_type_code,
+         ${q('violationCode')} AS violation_code,
+         ${q('fineAmount')} AS fine_amount,
+         ${q('priorityOrder')} AS priority_order
+       FROM ${q('FinePolicyTemplateRules')}
+       WHERE ${q('finePolicyTemplateVersionId')} = ANY($1::bigint[])
+         AND ${q('isActive')} = TRUE
+       ORDER BY ${q('priorityOrder')}`,
+      [versionIds],
+    );
+    for (const r of rules) {
+      const list = rulesMap.get(r.version_id) ?? [];
+      list.push({
+        rule_id: r.rule_id,
+        session_type_code: r.session_type_code,
+        violation_code: r.violation_code,
+        fine_amount: Number(r.fine_amount),
+        priority_order: r.priority_order,
+      });
+      rulesMap.set(r.version_id, list);
+    }
+  }
+
+  return templates.map((t) => ({
+    template_id: t.template_id,
+    template_code: t.template_code,
+    template_name: t.template_name,
+    description: t.description,
+    is_active: t.is_active,
+    active_version: t.version_id
+      ? {
+          version_id: t.version_id,
+          version_number: t.version_number,
+          currency_code: t.currency_code,
+          max_fine_per_student: t.max_fine_per_student ? Number(t.max_fine_per_student) : null,
+          rules: rulesMap.get(t.version_id) ?? [],
+        }
+      : null,
+  }));
+}
+
+export async function getEventFinePolicy(db: Queryable, eventId: number): Promise<any | null> {
+  const policy = await one<{
+    policy_id: number;
+    event_id: number;
+    policy_code: string;
+    policy_name: string;
+    currency_code: string;
+    maximum_fine_per_student: number | null;
+    policy_status_code: string;
+  }>(
+    db,
+    `SELECT 
+       ${q('eventFinePolicyId')} AS policy_id,
+       ${q('eventId')} AS event_id,
+       ${q('policyCode')} AS policy_code,
+       ${q('policyName')} AS policy_name,
+       ${q('currencyCode')} AS currency_code,
+       ${q('maximumFinePerStudent')} AS maximum_fine_per_student,
+       ${q('policyStatusCode')} AS policy_status_code
+     FROM ${q('EventFinePolicies')}
+     WHERE ${q('eventId')} = $1`,
+    [eventId],
+  );
+
+  const sessionRows = await many<{
+    session_id: number;
+    session_code: string;
+    session_name: string;
+    session_type_code: string;
+    rule_id: number | null;
+    violation_code: string | null;
+    base_fine_amount: number | null;
+    priority_order: number | null;
+    is_rule_active: boolean | null;
+    override_id: number | null;
+    override_fine_amount: number | null;
+    override_reason: string | null;
+  }>(
+    db,
+    `SELECT
+       s.${q('eventSessionId')} AS session_id,
+       s.${q('sessionCode')} AS session_code,
+       s.${q('sessionName')} AS session_name,
+       s.${q('sessionTypeCode')} AS session_type_code,
+       r.${q('eventFineRuleId')} AS rule_id,
+       r.${q('violationCode')} AS violation_code,
+       r.${q('fineAmount')} AS base_fine_amount,
+       r.${q('priorityOrder')} AS priority_order,
+       r.${q('isActive')} AS is_rule_active,
+       o.${q('eventFineRuleOverrideId')} AS override_id,
+       o.${q('fineAmount')} AS override_fine_amount,
+       o.${q('overrideReason')} AS override_reason
+     FROM ${q('EventSessions')} s
+     LEFT JOIN ${q('EventFineRules')} r 
+       ON r.${q('eventSessionId')} = s.${q('eventSessionId')} AND r.${q('isActive')} = TRUE
+     LEFT JOIN ${q('EventFineRuleOverrides')} o 
+       ON o.${q('eventFineRuleId')} = r.${q('eventFineRuleId')}
+     WHERE s.${q('eventId')} = $1
+     ORDER BY s.${q('startsAtUtc')}, s.${q('eventSessionId')}, r.${q('priorityOrder')}, r.${q('violationCode')}`,
+    [eventId],
+  );
+
+  const sessionMap = new Map<number, any>();
+  for (const row of sessionRows) {
+    let session = sessionMap.get(row.session_id);
+    if (!session) {
+      session = {
+        session_id: row.session_id,
+        session_code: row.session_code,
+        session_name: row.session_name,
+        session_type_code: row.session_type_code,
+        rules: [],
+      };
+      sessionMap.set(row.session_id, session);
+    }
+
+    if (row.rule_id && row.violation_code) {
+      const baseAmount = Number(row.base_fine_amount ?? 0);
+      const overrideAmount = row.override_fine_amount != null ? Number(row.override_fine_amount) : null;
+      session.rules.push({
+        rule_id: row.rule_id,
+        violation_code: row.violation_code,
+        base_fine_amount: baseAmount,
+        effective_fine_amount: overrideAmount ?? baseAmount,
+        priority_order: row.priority_order ?? 100,
+        override: row.override_id
+          ? {
+              override_id: row.override_id,
+              fine_amount: overrideAmount,
+              override_reason: row.override_reason,
+            }
+          : null,
+      });
+    }
+  }
+
+  return {
+    event_id: eventId,
+    fine_policy: policy
+      ? {
+          policy_id: policy.policy_id,
+          policy_code: policy.policy_code,
+          policy_name: policy.policy_name,
+          currency_code: policy.currency_code,
+          maximum_fine_per_student: policy.maximum_fine_per_student ? Number(policy.maximum_fine_per_student) : null,
+          status: policy.policy_status_code,
+        }
+      : null,
+    sessions: Array.from(sessionMap.values()),
+  };
+}
+
+export async function applyFinePolicyTemplateToEvent(
+  db: Queryable,
+  params: {
+    eventId: number;
+    templateVersionId: number;
+    policyCode: string;
+    policyName: string;
+    actorUserId: number;
+  },
+): Promise<number> {
+  const row = await one<{ policy_id: number }>(
+    db,
+    `SELECT sp_event_fine_policy_create_from_template($1, $2, $3, $4, $5) AS policy_id`,
+    [
+      params.eventId,
+      params.templateVersionId,
+      params.policyCode,
+      params.policyName,
+      params.actorUserId,
+    ],
+  );
+  return row!.policy_id;
+}
+
+export type UpsertFineRuleInput = {
+  sessionId: number;
+  violationCode: string;
+  fineAmount: number;
+  priorityOrder?: number;
+  override?: {
+    fineAmount: number;
+    overrideReason: string;
+  } | null;
+};
+
+export async function upsertEventFineRules(
+  db: Queryable,
+  params: {
+    eventId: number;
+    actorUserId: number;
+    policyCode?: string;
+    policyName?: string;
+    rules: UpsertFineRuleInput[];
+  },
+): Promise<void> {
+  let policy = await one<{ policy_id: number }>(
+    db,
+    `SELECT ${q('eventFinePolicyId')} AS policy_id FROM ${q('EventFinePolicies')} WHERE ${q('eventId')} = $1`,
+    [params.eventId],
+  );
+
+  if (!policy) {
+    const code = params.policyCode || `FP-EVENT-${params.eventId}`;
+    const name = params.policyName || `Event ${params.eventId} Fine Policy`;
+    const created = await one<{ policy_id: number }>(
+      db,
+      `INSERT INTO ${q('EventFinePolicies')} (
+         ${q('eventId')}, ${q('policyCode')}, ${q('policyName')}, ${q('createdByUserId')}
+       ) VALUES ($1, $2, $3, $4)
+       RETURNING ${q('eventFinePolicyId')} AS policy_id`,
+      [params.eventId, code, name, params.actorUserId],
+    );
+    policy = created!;
+  }
+
+  for (const r of params.rules) {
+    const priority = r.priorityOrder ?? 100;
+    const ruleRow = await one<{ rule_id: number }>(
+      db,
+      `INSERT INTO ${q('EventFineRules')} (
+         ${q('eventFinePolicyId')}, ${q('eventId')}, ${q('eventSessionId')}, ${q('violationCode')}, ${q('fineAmount')}, ${q('priorityOrder')}, ${q('isActive')}
+       ) VALUES ($1, $2, $3, $4, $5, $6, TRUE)
+       ON CONFLICT (${q('eventFinePolicyId')}, ${q('eventSessionId')}, ${q('violationCode')})
+       DO UPDATE SET ${q('fineAmount')} = EXCLUDED.${q('fineAmount')},
+                     ${q('priorityOrder')} = EXCLUDED.${q('priorityOrder')},
+                     ${q('isActive')} = TRUE
+       RETURNING ${q('eventFineRuleId')} AS rule_id`,
+      [policy.policy_id, params.eventId, r.sessionId, r.violationCode, r.fineAmount, priority],
+    );
+
+    const ruleId = ruleRow!.rule_id;
+
+    if (r.override) {
+      await db.query(
+        `INSERT INTO ${q('EventFineRuleOverrides')} (
+           ${q('eventFineRuleId')}, ${q('fineAmount')}, ${q('overrideReason')}, ${q('overriddenByUserId')}, ${q('overriddenAtUtc')}
+         ) VALUES ($1, $2, $3, $4, clock_timestamp())
+         ON CONFLICT (${q('eventFineRuleId')})
+         DO UPDATE SET ${q('fineAmount')} = EXCLUDED.${q('fineAmount')},
+                       ${q('overrideReason')} = EXCLUDED.${q('overrideReason')},
+                       ${q('overriddenByUserId')} = EXCLUDED.${q('overriddenByUserId')},
+                       ${q('overriddenAtUtc')} = clock_timestamp()`,
+        [ruleId, r.override.fineAmount, r.override.overrideReason, params.actorUserId],
+      );
+    } else if (r.override === null) {
+      await db.query(
+        `DELETE FROM ${q('EventFineRuleOverrides')} WHERE ${q('eventFineRuleId')} = $1`,
+        [ruleId],
+      );
+    }
+  }
+}
+
+// --- Composite Event & Fine Management Lifecycle ---
+
+export type CompositeSessionInput = {
+  sessionId?: number;
+  sessionCode: string;
+  sessionName: string;
+  sessionTypeCode?: string;
+  startsAtUtc: string | Date;
+  endsAtUtc: string | Date;
+  checkInOpensAtUtc: string | Date;
+  checkInClosesAtUtc: string | Date;
+  lateAfterUtc: string | Date;
+  checkOutOpensAtUtc?: string | Date | null;
+  checkOutClosesAtUtc?: string | Date | null;
+  requiresCheckOut?: boolean;
+  minimumMinutes?: number;
+};
+
+export type CompositeAudienceRuleInput = {
+  audienceScopeCode: 'ALL_STUDENTS' | 'PROGRAM' | 'YEAR_LEVEL' | 'SECTION' | 'STUDENT';
+  academicProgramId?: number | null;
+  sectionId?: number | null;
+  yearLevel?: number | null;
+  studentId?: number | null;
+  isRequired?: boolean;
+};
+
+export type CompositeFinePolicyInput = {
+  templateVersionId?: number | null;
+  policyCode?: string | null;
+  policyName?: string | null;
+  maximumFinePerStudent?: number | null;
+  customRules?: Array<{
+    sessionCode: string;
+    violationCode: string;
+    fineAmount: number;
+    priorityOrder?: number;
+    override?: {
+      fineAmount: number;
+      overrideReason: string;
+    } | null;
+  }>;
+};
+
+export async function upsertCompositeEvent(
+  db: Queryable,
+  params: {
+    eventId?: number;
+    academicTermId?: number;
+    eventCode: string;
+    eventName: string;
+    eventDate?: string | Date;
+    actorUserId: number;
+    sessions?: CompositeSessionInput[];
+    audienceRules?: CompositeAudienceRuleInput[];
+    finePolicy?: CompositeFinePolicyInput;
+  },
+): Promise<number> {
+  const termId = params.academicTermId ?? (await defaultTermId(db));
+  const eventDate = params.eventDate ?? new Date();
+
+  let eventId = params.eventId;
+  if (!eventId) {
+    const created = await one<{ eventId: number }>(
+      db,
+      `INSERT INTO ${q('Events')} (
+         ${q('academicTermId')}, ${q('eventCode')}, ${q('eventName')}, ${q('eventDate')}, ${q('eventStatusCode')}, ${q('createdByUserId')}
+       ) VALUES ($1, $2, $3, $4, 'DRAFT', $5)
+       ON CONFLICT (${q('eventCode')}) DO UPDATE
+       SET ${q('eventName')} = EXCLUDED.${q('eventName')},
+           ${q('eventDate')} = EXCLUDED.${q('eventDate')}
+       RETURNING ${q('eventId')}`,
+      [termId, params.eventCode, params.eventName, eventDate, params.actorUserId],
+    );
+    eventId = created!.eventId;
+  } else {
+    await db.query(
+      `UPDATE ${q('Events')}
+       SET ${q('eventName')} = $1,
+           ${q('eventCode')} = $2,
+           ${q('eventDate')} = COALESCE($3, ${q('eventDate')})
+       WHERE ${q('eventId')} = $4`,
+      [params.eventName, params.eventCode, params.eventDate, eventId],
+    );
+  }
+
+  // Upsert Sessions
+  const sessionCodeToIdMap = new Map<string, number>();
+  if (Array.isArray(params.sessions)) {
+    for (const s of params.sessions) {
+      const typeCode = s.sessionTypeCode || 'GENERAL';
+      const reqOut = s.requiresCheckOut ?? false;
+      const minMin = s.minimumMinutes ?? 0;
+      const sessRow = await one<{ eventSessionId: number }>(
+        db,
+        `INSERT INTO ${q('EventSessions')} (
+           ${q('eventId')}, ${q('academicTermId')}, ${q('sessionCode')}, ${q('sessionName')}, ${q('sessionTypeCode')},
+           ${q('startsAtUtc')}, ${q('endsAtUtc')}, ${q('checkInOpensAtUtc')}, ${q('checkInClosesAtUtc')}, ${q('lateAfterUtc')},
+           ${q('checkOutOpensAtUtc')}, ${q('checkOutClosesAtUtc')}, ${q('requiresCheckOut')}, ${q('minimumMinutes')}, ${q('isClosed')}
+         ) VALUES (
+           $1, $2, $3, $4, $5,
+           $6, $7, $8, $9, $10,
+           $11, $12, $13, $14, FALSE
+         )
+         ON CONFLICT (${q('eventId')}, ${q('sessionCode')}) DO UPDATE
+         SET ${q('sessionName')} = EXCLUDED.${q('sessionName')},
+             ${q('sessionTypeCode')} = EXCLUDED.${q('sessionTypeCode')},
+             ${q('startsAtUtc')} = EXCLUDED.${q('startsAtUtc')},
+             ${q('endsAtUtc')} = EXCLUDED.${q('endsAtUtc')},
+             ${q('checkInOpensAtUtc')} = EXCLUDED.${q('checkInOpensAtUtc')},
+             ${q('checkInClosesAtUtc')} = EXCLUDED.${q('checkInClosesAtUtc')},
+             ${q('lateAfterUtc')} = EXCLUDED.${q('lateAfterUtc')},
+             ${q('checkOutOpensAtUtc')} = EXCLUDED.${q('checkOutOpensAtUtc')},
+             ${q('checkOutClosesAtUtc')} = EXCLUDED.${q('checkOutClosesAtUtc')},
+             ${q('requiresCheckOut')} = EXCLUDED.${q('requiresCheckOut')},
+             ${q('minimumMinutes')} = EXCLUDED.${q('minimumMinutes')}
+         RETURNING ${q('eventSessionId')}`,
+        [
+          eventId,
+          termId,
+          s.sessionCode,
+          s.sessionName,
+          typeCode,
+          s.startsAtUtc,
+          s.endsAtUtc,
+          s.checkInOpensAtUtc,
+          s.checkInClosesAtUtc,
+          s.lateAfterUtc,
+          s.checkOutOpensAtUtc ?? null,
+          s.checkOutClosesAtUtc ?? null,
+          reqOut,
+          minMin,
+        ],
+      );
+      sessionCodeToIdMap.set(s.sessionCode, sessRow!.eventSessionId);
+    }
+  }
+
+  // Upsert Audience Rules
+  if (Array.isArray(params.audienceRules)) {
+    for (const ar of params.audienceRules) {
+      await db.query(
+        `INSERT INTO ${q('EventAudienceRules')} (
+           ${q('eventId')}, ${q('academicTermId')}, ${q('audienceScopeCode')},
+           ${q('academicProgramId')}, ${q('sectionId')}, ${q('yearLevel')}, ${q('studentId')},
+           ${q('isRequired')}, ${q('createdByUserId')}
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         ON CONFLICT (${q('eventId')}, ${q('audienceScopeCode')}, ${q('academicProgramId')}, ${q('sectionId')}, ${q('yearLevel')}, ${q('studentId')})
+         DO UPDATE SET ${q('isRequired')} = EXCLUDED.${q('isRequired')}`,
+        [
+          eventId,
+          termId,
+          ar.audienceScopeCode,
+          ar.academicProgramId ?? null,
+          ar.sectionId ?? null,
+          ar.yearLevel ?? null,
+          ar.studentId ?? null,
+          ar.isRequired ?? true,
+          params.actorUserId,
+        ],
+      );
+    }
+  }
+
+  // Upsert Fine Policy
+  if (params.finePolicy) {
+    const fp = params.finePolicy;
+    let policyId: number;
+
+    const existingPolicy = await one<{ policy_id: number }>(
+      db,
+      `SELECT ${q('eventFinePolicyId')} AS policy_id FROM ${q('EventFinePolicies')} WHERE ${q('eventId')} = $1`,
+      [eventId],
+    );
+
+    if (!existingPolicy) {
+      if (fp.templateVersionId) {
+        const pCode = fp.policyCode || `FP-${params.eventCode}`;
+        const pName = fp.policyName || `${params.eventName} Fine Policy`;
+        policyId = await applyFinePolicyTemplateToEvent(db, {
+          eventId,
+          templateVersionId: fp.templateVersionId,
+          policyCode: pCode,
+          policyName: pName,
+          actorUserId: params.actorUserId,
+        });
+      } else {
+        const pCode = fp.policyCode || `FP-${params.eventCode}`;
+        const pName = fp.policyName || `${params.eventName} Fine Policy`;
+        const np = await one<{ policy_id: number }>(
+          db,
+          `INSERT INTO ${q('EventFinePolicies')} (
+             ${q('eventId')}, ${q('policyCode')}, ${q('policyName')}, ${q('maximumFinePerStudent')}, ${q('createdByUserId')}
+           ) VALUES ($1, $2, $3, $4, $5)
+           RETURNING ${q('eventFinePolicyId')} AS policy_id`,
+          [eventId, pCode, pName, fp.maximumFinePerStudent ?? 500.0, params.actorUserId],
+        );
+        policyId = np!.policy_id;
+      }
+    } else {
+      policyId = existingPolicy.policy_id;
+      if (fp.maximumFinePerStudent != null) {
+        await db.query(
+          `UPDATE ${q('EventFinePolicies')} SET ${q('maximumFinePerStudent')} = $1 WHERE ${q('eventFinePolicyId')} = $2`,
+          [fp.maximumFinePerStudent, policyId],
+        );
+      }
+    }
+
+    // Custom Rules
+    if (Array.isArray(fp.customRules)) {
+      const fineRulesInput: UpsertFineRuleInput[] = [];
+      for (const cr of fp.customRules) {
+        let sId = sessionCodeToIdMap.get(cr.sessionCode);
+        if (!sId) {
+          const fetchedSess = await one<{ eventSessionId: number }>(
+            db,
+            `SELECT ${q('eventSessionId')} FROM ${q('EventSessions')} WHERE ${q('eventId')} = $1 AND ${q('sessionCode')} = $2`,
+            [eventId, cr.sessionCode],
+          );
+          sId = fetchedSess?.eventSessionId;
+        }
+        if (sId) {
+          fineRulesInput.push({
+            sessionId: sId,
+            violationCode: cr.violationCode,
+            fineAmount: cr.fineAmount,
+            priorityOrder: cr.priorityOrder ?? 100,
+            override: cr.override,
+          });
+        }
+      }
+      if (fineRulesInput.length > 0) {
+        await upsertEventFineRules(db, {
+          eventId,
+          actorUserId: params.actorUserId,
+          rules: fineRulesInput,
+        });
+      }
+    }
+  }
+
+  return eventId;
+}
+
+export async function upsertFineTemplateWithVersion(
+  db: Queryable,
+  params: {
+    templateCode: string;
+    templateName: string;
+    description?: string | null;
+    versionNumber?: number;
+    currencyCode?: string;
+    maximumFinePerStudent?: number | null;
+    publish?: boolean;
+    actorUserId: number;
+    rules: Array<{
+      sessionTypeCode: string;
+      violationCode: string;
+      fineAmount: number;
+      priorityOrder?: number;
+    }>;
+  },
+): Promise<{ templateId: number; versionId: number }> {
+  const tplRow = await one<{ template_id: number }>(
+    db,
+    `INSERT INTO ${q('FinePolicyTemplates')} (
+       ${q('templateCode')}, ${q('templateName')}, ${q('description')}, ${q('isActive')}, ${q('createdByUserId')}
+     ) VALUES ($1, $2, $3, TRUE, $4)
+     ON CONFLICT (${q('templateCode')}) DO UPDATE
+     SET ${q('templateName')} = EXCLUDED.${q('templateName')},
+         ${q('description')} = EXCLUDED.${q('description')},
+         ${q('isActive')} = TRUE
+     RETURNING ${q('finePolicyTemplateId')} AS template_id`,
+    [params.templateCode, params.templateName, params.description ?? null, params.actorUserId],
+  );
+  const templateId = tplRow!.template_id;
+
+  const verNum = params.versionNumber ?? 1;
+  const status = params.publish ? 'PUBLISHED' : 'DRAFT';
+  const currency = params.currencyCode || 'PHP';
+
+  const verRow = await one<{ version_id: number }>(
+    db,
+    `INSERT INTO ${q('FinePolicyTemplateVersions')} (
+       ${q('finePolicyTemplateId')}, ${q('versionNumber')}, ${q('versionStatusCode')},
+       ${q('currencyCode')}, ${q('maximumFinePerStudent')}, ${q('createdByUserId')}, ${q('publishedAtUtc')}
+     ) VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $3 = 'PUBLISHED' THEN clock_timestamp() ELSE NULL END)
+     ON CONFLICT (${q('finePolicyTemplateId')}, ${q('versionNumber')}) DO UPDATE
+     SET ${q('versionStatusCode')} = EXCLUDED.${q('versionStatusCode')},
+         ${q('maximumFinePerStudent')} = EXCLUDED.${q('maximumFinePerStudent')},
+         ${q('publishedAtUtc')} = CASE WHEN EXCLUDED.${q('versionStatusCode')} = 'PUBLISHED' THEN clock_timestamp() ELSE ${q('FinePolicyTemplateVersions')}.${q('publishedAtUtc')} END
+     RETURNING ${q('finePolicyTemplateVersionId')} AS version_id`,
+    [templateId, verNum, status, currency, params.maximumFinePerStudent ?? null, params.actorUserId],
+  );
+  const versionId = verRow!.version_id;
+
+  for (const r of params.rules) {
+    await db.query(
+      `INSERT INTO ${q('FinePolicyTemplateRules')} (
+         ${q('finePolicyTemplateVersionId')}, ${q('sessionTypeCode')}, ${q('violationCode')},
+         ${q('fineAmount')}, ${q('priorityOrder')}, ${q('isActive')}
+       ) VALUES ($1, $2, $3, $4, $5, TRUE)
+       ON CONFLICT (${q('finePolicyTemplateVersionId')}, ${q('sessionTypeCode')}, ${q('violationCode')}) DO UPDATE
+       SET ${q('fineAmount')} = EXCLUDED.${q('fineAmount')},
+           ${q('priorityOrder')} = EXCLUDED.${q('priorityOrder')},
+           ${q('isActive')} = TRUE`,
+      [versionId, r.sessionTypeCode || 'GENERAL', r.violationCode, r.fineAmount, r.priorityOrder ?? 100],
+    );
+  }
+
+  return { templateId, versionId };
+}
+
+export async function publishEventRoster(
+  db: Queryable,
+  eventId: number,
+  actorUserId: number,
+): Promise<{ newRegistrationsCount: number; newParticipantsCount: number }> {
+  await db.query(`CALL ssc.sp_event_roster_generate_from_audience_rules($1, $2, 0, 0)`, [eventId, actorUserId]);
+  await db.query(
+    `UPDATE ${q('Events')} SET ${q('eventStatusCode')} = 'PUBLISHED' WHERE ${q('eventId')} = $1`,
+    [eventId],
+  );
+  const regs = await one<{ count: number }>(
+    db,
+    `SELECT COUNT(*)::int AS count FROM ${q('EventRegistrations')} WHERE ${q('eventId')} = $1`,
+    [eventId],
+  );
+  const parts = await one<{ count: number }>(
+    db,
+    `SELECT COUNT(*)::int AS count FROM ${q('EventParticipants')} p
+     JOIN ${q('EventSessions')} s ON s.${q('eventSessionId')} = p.${q('eventSessionId')}
+     WHERE s.${q('eventId')} = $1`,
+    [eventId],
+  );
+  return {
+    newRegistrationsCount: regs?.count ?? 0,
+    newParticipantsCount: parts?.count ?? 0,
+  };
+}
+
+export async function closeSessionAndAssessFines(
+  db: Queryable,
+  sessionId: number,
+  actorUserId: number,
+): Promise<{ assessmentsCreated: number; totalAmountAssessed: number }> {
+  await db.query(
+    `UPDATE ${q('EventSessions')} SET ${q('isClosed')} = TRUE WHERE ${q('eventSessionId')} = $1`,
+    [sessionId],
+  );
+  await db.query(
+    `CALL ssc.sp_student_fine_assess_closed_session($1, $2, 0, 0)`,
+    [sessionId, actorUserId],
+  );
+  const totals = await one<{ count: number; total: number }>(
+    db,
+    `SELECT COUNT(*)::int AS count, COALESCE(SUM(${q('assessedAmount')}), 0.00)::numeric AS total
+     FROM ${q('StudentFineAssessments')}
+     WHERE ${q('eventSessionId')} = $1`,
+    [sessionId],
+  );
+  return {
+    assessmentsCreated: totals?.count ?? 0,
+    totalAmountAssessed: Number(totals?.total ?? 0),
+  };
+}
+
+export async function listStudentFineBalances(
+  db: Queryable,
+  filters: {
+    studentId?: number;
+    studentNumber?: string;
+    sessionId?: number;
+    violationCode?: string;
+    status?: string;
+  },
+): Promise<any[]> {
+  const conditions: string[] = [];
+  const values: unknown[] = [];
+  let i = 1;
+
+  if (filters.studentId != null) {
+    conditions.push(`"studentId" = $${i++}`);
+    values.push(filters.studentId);
+  }
+  if (filters.studentNumber) {
+    conditions.push(`"studentNumber" = $${i++}`);
+    values.push(filters.studentNumber);
+  }
+  if (filters.sessionId != null) {
+    conditions.push(`"eventSessionId" = $${i++}`);
+    values.push(filters.sessionId);
+  }
+  if (filters.violationCode) {
+    conditions.push(`"violationCode" = $${i++}`);
+    values.push(filters.violationCode);
+  }
+  if (filters.status) {
+    conditions.push(`"assessmentStatusCode" = $${i++}`);
+    values.push(filters.status);
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  return many<any>(
+    db,
+    `SELECT * FROM ssc."VwStudentFineBalances" ${where} ORDER BY "studentFineAssessmentId" DESC`,
+    values,
+  );
+}
+
+export async function postFinePayment(
+  db: Queryable,
+  params: {
+    paymentReference: string;
+    paymentMethodCode: string;
+    totalAmount: number;
+    externalPaymentReference?: string | null;
+    actorUserId: number;
+    allocations: Array<{ assessment_id: number; amount: number }>;
+  },
+): Promise<number> {
+  const row = await one<{ payment_id: number }>(
+    db,
+    `SELECT sp_fine_payment_post($1, $2, $3, $4, $5, $6::jsonb) AS payment_id`,
+    [
+      params.paymentReference,
+      params.paymentMethodCode,
+      params.totalAmount,
+      params.actorUserId,
+      params.externalPaymentReference ?? null,
+      JSON.stringify(params.allocations),
+    ],
+  );
+  return row!.payment_id;
+}
+
+export async function voidFinePayment(
+  db: Queryable,
+  params: {
+    paymentId: number;
+    voidReason: string;
+    actorUserId: number;
+  },
+): Promise<void> {
+  await db.query(`CALL ssc.sp_fine_payment_void($1, $2, $3)`, [
+    params.paymentId,
+    params.voidReason,
+    params.actorUserId,
+  ]);
+}
+
+export async function requestFineWaiver(
+  db: Queryable,
+  params: {
+    assessmentId: number;
+    waiverReason: string;
+    actorUserId: number;
+  },
+): Promise<number> {
+  const row = await one<{ waiver_id: number }>(
+    db,
+    `SELECT sp_fine_waiver_request($1, $2, $3) AS waiver_id`,
+    [params.assessmentId, params.waiverReason, params.actorUserId],
+  );
+  return row!.waiver_id;
+}
+
+export async function reviewFineWaiver(
+  db: Queryable,
+  params: {
+    waiverRequestId: number;
+    decision: 'APPROVED' | 'REJECTED';
+    reviewNotes: string;
+    actorUserId: number;
+  },
+): Promise<void> {
+  await db.query(`CALL ssc.sp_fine_waiver_review($1, $2, $3, $4)`, [
+    params.waiverRequestId,
+    params.decision,
+    params.reviewNotes,
+    params.actorUserId,
+  ]);
+}
+
+

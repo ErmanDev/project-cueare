@@ -19,6 +19,7 @@ import {
   parsePathId,
   queryInt,
   queryString,
+  requireInt,
   requireString,
 } from '../utils/http.ts';
 import { parseIsoDateTime } from '../utils/time.ts';
@@ -729,3 +730,359 @@ function fromCsv(text: string): Record<string, unknown>[] {
     return m;
   });
 }
+
+// --- fine policies & rules ---
+
+adminRouter.get(
+  '/fine-templates',
+  asyncHandler(async (_req, res) => {
+    const templates = await q.listFineTemplates(getPool());
+    res.json(templates);
+  }),
+);
+
+adminRouter.get(
+  '/events/:id/fine-policy',
+  asyncHandler(async (req, res) => {
+    const eventId = parsePathId(req.params.id);
+    const policy = await q.getEventFinePolicy(getPool(), eventId);
+    res.json(policy);
+  }),
+);
+
+adminRouter.post(
+  '/events/:id/fine-policy/from-template',
+  asyncHandler(async (req, res) => {
+    const eventId = parsePathId(req.params.id);
+    const body = jsonObject(req);
+    const templateVersionId = requireInt(body, 'template_version_id');
+    const policyCode = optionalString(body, 'policy_code') ?? `FP-EVT-${eventId}`;
+    const policyName = optionalString(body, 'policy_name') ?? `Event ${eventId} Fine Policy`;
+
+    const policyId = await q.applyFinePolicyTemplateToEvent(getPool(), {
+      eventId,
+      templateVersionId,
+      policyCode,
+      policyName,
+      actorUserId: req.auth!.id,
+    });
+
+    const policy = await q.getEventFinePolicy(getPool(), eventId);
+    res.status(201).json({ policy_id: policyId, ...policy });
+  }),
+);
+
+adminRouter.put(
+  '/events/:id/fine-policy/rules',
+  asyncHandler(async (req, res) => {
+    const eventId = parsePathId(req.params.id);
+    const body = jsonObject(req);
+    const rawRules = body.rules;
+    if (!Array.isArray(rawRules)) {
+      throw badRequest('Body must contain a rules array');
+    }
+
+    const policyCode = optionalString(body, 'policy_code') ?? undefined;
+    const policyName = optionalString(body, 'policy_name') ?? undefined;
+
+    const parsedRules: q.UpsertFineRuleInput[] = [];
+    for (const r of rawRules) {
+      if (!r || typeof r !== 'object') continue;
+      const ruleObj = r as Record<string, unknown>;
+      const sessionId = Number(ruleObj.session_id);
+      const violationCode = String(ruleObj.violation_code || '').trim().toUpperCase();
+      const fineAmount = Number(ruleObj.fine_amount ?? 0);
+      const priorityOrder = ruleObj.priority_order != null ? Number(ruleObj.priority_order) : undefined;
+      if (!sessionId || !violationCode || isNaN(fineAmount)) {
+        throw badRequest('Each rule requires valid session_id, violation_code, and fine_amount');
+      }
+
+      let override: { fineAmount: number; overrideReason: string } | null | undefined = undefined;
+      if (ruleObj.override === null) {
+        override = null;
+      } else if (ruleObj.override && typeof ruleObj.override === 'object') {
+        const o = ruleObj.override as Record<string, unknown>;
+        const oAmount = Number(o.fine_amount);
+        const oReason = String(o.override_reason || '').trim();
+        if (isNaN(oAmount) || !oReason) {
+          throw badRequest('Override requires numeric fine_amount and override_reason');
+        }
+        override = { fineAmount: oAmount, overrideReason: oReason };
+      }
+
+      parsedRules.push({
+        sessionId,
+        violationCode,
+        fineAmount,
+        priorityOrder,
+        override,
+      });
+    }
+
+    await withTransaction(getPool(), async (client) => {
+      await q.upsertEventFineRules(client, {
+        eventId,
+        actorUserId: req.auth!.id,
+        policyCode,
+        policyName,
+        rules: parsedRules,
+      });
+    });
+
+    const updated = await q.getEventFinePolicy(getPool(), eventId);
+    res.json(updated);
+  }),
+);
+
+// --- Composite Event Upsert & Publish ---
+
+adminRouter.post(
+  '/events/composite',
+  asyncHandler(async (req, res) => {
+    const body = jsonObject(req);
+    const eventCode = requireString(body, 'event_code');
+    const eventName = requireString(body, 'event_name');
+    const academicTermId = optionalInt(body, 'academic_term_id') ?? undefined;
+    const eventDate = optionalString(body, 'event_date') ?? undefined;
+    const sessions = Array.isArray(body.sessions) ? (body.sessions as any[]) : undefined;
+    const audienceRules = Array.isArray(body.audience_rules) ? (body.audience_rules as any[]) : undefined;
+    const finePolicy = body.fine_policy && typeof body.fine_policy === 'object' ? (body.fine_policy as any) : undefined;
+
+    let createdId = 0;
+    await withTransaction(getPool(), async (client) => {
+      createdId = await q.upsertCompositeEvent(client, {
+        eventCode,
+        eventName,
+        academicTermId,
+        eventDate,
+        actorUserId: req.auth!.id,
+        sessions,
+        audienceRules,
+        finePolicy,
+      });
+    });
+
+    const eventWithPolicy = await q.getEventFinePolicy(getPool(), createdId);
+    res.status(201).json({ event_id: createdId, ...eventWithPolicy });
+  }),
+);
+
+adminRouter.put(
+  '/events/:id/composite',
+  asyncHandler(async (req, res) => {
+    const eventId = parsePathId(req.params.id);
+    const body = jsonObject(req);
+    const eventCode = requireString(body, 'event_code');
+    const eventName = requireString(body, 'event_name');
+    const academicTermId = optionalInt(body, 'academic_term_id') ?? undefined;
+    const eventDate = optionalString(body, 'event_date') ?? undefined;
+    const sessions = Array.isArray(body.sessions) ? (body.sessions as any[]) : undefined;
+    const audienceRules = Array.isArray(body.audience_rules) ? (body.audience_rules as any[]) : undefined;
+    const finePolicy = body.fine_policy && typeof body.fine_policy === 'object' ? (body.fine_policy as any) : undefined;
+
+    await withTransaction(getPool(), async (client) => {
+      await q.upsertCompositeEvent(client, {
+        eventId,
+        eventCode,
+        eventName,
+        academicTermId,
+        eventDate,
+        actorUserId: req.auth!.id,
+        sessions,
+        audienceRules,
+        finePolicy,
+      });
+    });
+
+    const eventWithPolicy = await q.getEventFinePolicy(getPool(), eventId);
+    res.json({ event_id: eventId, ...eventWithPolicy });
+  }),
+);
+
+adminRouter.post(
+  '/events/:id/publish',
+  asyncHandler(async (req, res) => {
+    const eventId = parsePathId(req.params.id);
+    const result = await withTransaction(getPool(), async (client) => {
+      return q.publishEventRoster(client, eventId, req.auth!.id);
+    });
+    res.json({ event_id: eventId, status: 'PUBLISHED', ...result });
+  }),
+);
+
+adminRouter.post(
+  '/events/:id/sessions/:sessionId/assess-fines',
+  asyncHandler(async (req, res) => {
+    const sessionId = parsePathId(req.params.sessionId);
+    const result = await withTransaction(getPool(), async (client) => {
+      return q.closeSessionAndAssessFines(client, sessionId, req.auth!.id);
+    });
+    res.json({ session_id: sessionId, ...result });
+  }),
+);
+
+// --- Fine Template Upsert ---
+
+adminRouter.post(
+  '/fine-templates/upsert',
+  asyncHandler(async (req, res) => {
+    const body = jsonObject(req);
+    const templateCode = requireString(body, 'template_code');
+    const templateName = requireString(body, 'template_name');
+    const description = optionalString(body, 'description');
+    const versionNumber = optionalInt(body, 'version_number') ?? 1;
+    const currencyCode = optionalString(body, 'currency_code') ?? 'PHP';
+    const maximumFinePerStudent = typeof body.maximum_fine_per_student === 'number' ? body.maximum_fine_per_student : null;
+    const publish = optionalBool(body, 'publish') ?? true;
+    const rawRules = Array.isArray(body.rules) ? (body.rules as any[]) : [];
+
+    const rules = rawRules.map((r) => ({
+      sessionTypeCode: String(r.session_type_code || 'GENERAL').trim().toUpperCase(),
+      violationCode: String(r.violation_code || '').trim().toUpperCase(),
+      fineAmount: Number(r.fine_amount ?? 0),
+      priorityOrder: r.priority_order != null ? Number(r.priority_order) : 100,
+    }));
+
+    const result = await withTransaction(getPool(), async (client) => {
+      return q.upsertFineTemplateWithVersion(client, {
+        templateCode,
+        templateName,
+        description,
+        versionNumber,
+        currencyCode,
+        maximumFinePerStudent,
+        publish,
+        actorUserId: req.auth!.id,
+        rules,
+      });
+    });
+
+    const allTemplates = await q.listFineTemplates(getPool());
+    const matched = allTemplates.find((t) => t.template_id === result.templateId);
+    res.status(201).json(matched ?? result);
+  }),
+);
+
+// --- Fine Balances, Payments & Waivers ---
+
+adminRouter.get(
+  '/fines/balances',
+  asyncHandler(async (req, res) => {
+    const studentId = queryInt(req, 'student_id') ?? undefined;
+    const studentNumber = queryString(req, 'student_number') ?? undefined;
+    const sessionId = queryInt(req, 'session_id') ?? undefined;
+    const violationCode = queryString(req, 'violation_code') ?? undefined;
+    const status = queryString(req, 'status') ?? undefined;
+
+    const balances = await q.listStudentFineBalances(getPool(), {
+      studentId,
+      studentNumber,
+      sessionId,
+      violationCode,
+      status,
+    });
+    res.json(balances);
+  }),
+);
+
+adminRouter.post(
+  '/fines/payments',
+  asyncHandler(async (req, res) => {
+    const body = jsonObject(req);
+    const paymentReference = requireString(body, 'payment_reference');
+    const paymentMethodCode = requireString(body, 'payment_method_code').toUpperCase();
+    const totalAmount = Number(body.total_amount);
+    const externalPaymentReference = optionalString(body, 'external_payment_reference');
+    const rawAllocations = body.allocations;
+
+    if (isNaN(totalAmount) || totalAmount <= 0) {
+      throw badRequest('total_amount must be a positive number');
+    }
+    if (!Array.isArray(rawAllocations) || rawAllocations.length === 0) {
+      throw badRequest('allocations must be a non-empty array');
+    }
+
+    const allocations = rawAllocations.map((a: any) => ({
+      assessment_id: Number(a.assessment_id),
+      amount: Number(a.amount),
+    }));
+
+    const paymentId = await withTransaction(getPool(), async (client) => {
+      return q.postFinePayment(client, {
+        paymentReference,
+        paymentMethodCode,
+        totalAmount,
+        externalPaymentReference,
+        actorUserId: req.auth!.id,
+        allocations,
+      });
+    });
+
+    res.status(201).json({ payment_id: paymentId, payment_reference: paymentReference, total_amount: totalAmount });
+  }),
+);
+
+adminRouter.post(
+  '/fines/payments/:id/void',
+  asyncHandler(async (req, res) => {
+    const paymentId = parsePathId(req.params.id);
+    const body = jsonObject(req);
+    const voidReason = requireString(body, 'void_reason');
+
+    await withTransaction(getPool(), async (client) => {
+      await q.voidFinePayment(client, {
+        paymentId,
+        voidReason,
+        actorUserId: req.auth!.id,
+      });
+    });
+
+    res.json({ payment_id: paymentId, status: 'VOIDED', reason: voidReason });
+  }),
+);
+
+adminRouter.post(
+  '/fines/waivers',
+  asyncHandler(async (req, res) => {
+    const body = jsonObject(req);
+    const assessmentId = requireInt(body, 'assessment_id');
+    const waiverReason = requireString(body, 'waiver_reason');
+
+    const waiverId = await withTransaction(getPool(), async (client) => {
+      return q.requestFineWaiver(client, {
+        assessmentId,
+        waiverReason,
+        actorUserId: req.auth!.id,
+      });
+    });
+
+    res.status(201).json({ waiver_request_id: waiverId, assessment_id: assessmentId, status: 'PENDING' });
+  }),
+);
+
+adminRouter.post(
+  '/fines/waivers/:id/review',
+  asyncHandler(async (req, res) => {
+    const waiverRequestId = parsePathId(req.params.id);
+    const body = jsonObject(req);
+    const decision = requireString(body, 'decision').toUpperCase() as 'APPROVED' | 'REJECTED';
+    const reviewNotes = requireString(body, 'review_notes');
+
+    if (!['APPROVED', 'REJECTED'].includes(decision)) {
+      throw badRequest('decision must be APPROVED or REJECTED');
+    }
+
+    await withTransaction(getPool(), async (client) => {
+      await q.reviewFineWaiver(client, {
+        waiverRequestId,
+        decision,
+        reviewNotes,
+        actorUserId: req.auth!.id,
+      });
+    });
+
+    res.json({ waiver_request_id: waiverRequestId, decision, review_notes: reviewNotes });
+  }),
+);
+
+

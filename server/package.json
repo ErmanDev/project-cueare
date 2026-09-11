@@ -13,6 +13,8 @@
     "ensure-db": "bun scripts/ensure-database.ts",
     "seed-admin": "bun scripts/seed-admin.ts",
     "seed-sample": "bun scripts/seed-sample.ts",
+    "seed-fine-templates": "bun scripts/seed-fine-templates.ts",
+    "seed-acquaintance-event": "bun scripts/seed-acquaintance-event.ts",
     "test": "bun test --timeout 30000",
     "test:watch": "bun test --watch --timeout 30000"
   },
