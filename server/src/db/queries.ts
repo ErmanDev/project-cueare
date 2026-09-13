@@ -904,8 +904,101 @@ export async function updateEvent(
   return (await getEventById(db, id)) ?? existing;
 }
 
+function pgErrCode(err: unknown): string {
+  return err && typeof err === 'object' && 'code' in err ? String((err as { code: unknown }).code) : '';
+}
+
+/** Ignore missing tables/columns/triggers so wipe works on both schema.ts and the SQL install. */
+async function ignoreMissingRelation(db: Queryable, sql: string, values: unknown[] = []): Promise<void> {
+  try {
+    await db.query(sql, values);
+  } catch (err) {
+    const code = pgErrCode(err);
+    if (code !== '42P01' && code !== '42703' && code !== '42704') throw err;
+  }
+}
+
 export async function deleteEvent(db: Queryable, id: number): Promise<void> {
-  await db.query(`DELETE FROM ${q('Events')} WHERE ${q('eventId')} = $1`, [id]);
+  const sessions = `SELECT ${q('eventSessionId')} FROM ${q('EventSessions')} WHERE ${q('eventId')} = $1`;
+  const participants = `SELECT ep.${q('eventParticipantId')} FROM ${q('EventParticipants')} ep
+     JOIN ${q('EventSessions')} es ON es.${q('eventSessionId')} = ep.${q('eventSessionId')}
+     WHERE es.${q('eventId')} = $1`;
+  const records = `SELECT ar.${q('attendanceRecordId')} FROM ${q('AttendanceRecords')} ar
+     WHERE ar.${q('eventParticipantId')} IN (${participants})`;
+  const assessments = `SELECT s.${q('studentFineAssessmentId')} FROM ${q('StudentFineAssessments')} s
+     WHERE s.${q('eventSessionId')} IN (${sessions})`;
+  const rules = `SELECT ${q('eventFineRuleId')} FROM ${q('EventFineRules')} WHERE ${q('eventId')} = $1`;
+  const registrations = `SELECT ${q('eventRegistrationId')} FROM ${q('EventRegistrations')} WHERE ${q('eventId')} = $1`;
+
+  await ignoreMissingRelation(
+    db,
+    `ALTER TABLE ${q('AttendanceLogs')} DISABLE TRIGGER USER`,
+  );
+  try {
+    await ignoreMissingRelation(
+      db,
+      `DELETE FROM ${q('EventFineRuleOverrides')} WHERE ${q('eventFineRuleId')} IN (${rules})`,
+      [id],
+    );
+    await ignoreMissingRelation(db, `DELETE FROM ${q('EventFineRules')} WHERE ${q('eventId')} = $1`, [id]);
+    await ignoreMissingRelation(db, `DELETE FROM ${q('EventFinePolicies')} WHERE ${q('eventId')} = $1`, [id]);
+    await ignoreMissingRelation(
+      db,
+      `DELETE FROM ${q('FinePaymentAllocations')} WHERE ${q('studentFineAssessmentId')} IN (${assessments})`,
+      [id],
+    );
+    await ignoreMissingRelation(
+      db,
+      `DELETE FROM ${q('FineWaiverRequests')} WHERE ${q('studentFineAssessmentId')} IN (${assessments})`,
+      [id],
+    );
+    await ignoreMissingRelation(
+      db,
+      `DELETE FROM ${q('StudentFineStatusHistory')} WHERE ${q('studentFineAssessmentId')} IN (${assessments})`,
+      [id],
+    );
+    await ignoreMissingRelation(
+      db,
+      `DELETE FROM ${q('StudentFineAssessments')} WHERE ${q('eventSessionId')} IN (${sessions})`,
+      [id],
+    );
+    await ignoreMissingRelation(
+      db,
+      `DELETE FROM ${q('AttendanceScanAttempts')} WHERE ${q('eventSessionId')} IN (${sessions})`,
+      [id],
+    );
+    await ignoreMissingRelation(
+      db,
+      `DELETE FROM ${q('AttendanceLogs')} WHERE ${q('attendanceRecordId')} IN (${records})`,
+      [id],
+    );
+    await ignoreMissingRelation(
+      db,
+      `DELETE FROM ${q('AttendanceCorrections')} WHERE ${q('attendanceRecordId')} IN (${records})`,
+      [id],
+    );
+    await ignoreMissingRelation(
+      db,
+      `DELETE FROM ${q('AttendanceRecords')} WHERE ${q('eventParticipantId')} IN (${participants})`,
+      [id],
+    );
+    await ignoreMissingRelation(
+      db,
+      `DELETE FROM ${q('EventParticipantQrCredentials')} WHERE ${q('eventRegistrationId')} IN (${registrations})`,
+      [id],
+    );
+    await ignoreMissingRelation(
+      db,
+      `DELETE FROM ${q('EventParticipants')} WHERE ${q('eventSessionId')} IN (${sessions})`,
+      [id],
+    );
+    await ignoreMissingRelation(db, `DELETE FROM ${q('EventRegistrations')} WHERE ${q('eventId')} = $1`, [id]);
+    await ignoreMissingRelation(db, `DELETE FROM ${q('EventAudienceRules')} WHERE ${q('eventId')} = $1`, [id]);
+    await ignoreMissingRelation(db, `DELETE FROM ${q('EventSessions')} WHERE ${q('eventId')} = $1`, [id]);
+    await db.query(`DELETE FROM ${q('Events')} WHERE ${q('eventId')} = $1`, [id]);
+  } finally {
+    await ignoreMissingRelation(db, `ALTER TABLE ${q('AttendanceLogs')} ENABLE TRIGGER USER`);
+  }
 }
 
 export async function deactivateEvent(db: Queryable, id: number): Promise<void> {

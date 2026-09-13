@@ -534,6 +534,58 @@ describe('AttendanceService', () => {
     });
   });
 
+  describe('deleteEvent', () => {
+    it('removes an event that still has session windows', async () => {
+      if (!dbReady) return;
+      await pool.query(`
+        ALTER TABLE "EventSessions" DROP CONSTRAINT IF EXISTS fk_event_sessions_event;
+        ALTER TABLE "EventSessions" ADD CONSTRAINT fk_event_sessions_event
+          FOREIGN KEY ("eventId", "academicTermId")
+          REFERENCES "Events"("eventId", "academicTermId");
+      `);
+      try {
+        await q.deleteEvent(pool, eventId);
+        expect(await q.getEventById(pool, eventId)).toBeNull();
+        expect(await q.windowsForEvent(pool, eventId)).toEqual([]);
+      } finally {
+        await pool.query(`
+          ALTER TABLE "EventSessions" DROP CONSTRAINT IF EXISTS fk_event_sessions_event;
+          ALTER TABLE "EventSessions" ADD CONSTRAINT fk_event_sessions_event
+            FOREIGN KEY ("eventId", "academicTermId")
+            REFERENCES "Events"("eventId", "academicTermId") ON DELETE CASCADE;
+        `);
+      }
+    });
+
+    it('removes an event after scans even when attendance logs are append-only', async () => {
+      if (!dbReady) return;
+      await service.confirm({
+        eventId,
+        studentId,
+        sessionWindowId: morningId,
+        scannedBy: moderatorId,
+      });
+      await pool.query(`
+        CREATE OR REPLACE FUNCTION fn_tr_attendance_logs_append_only()
+        RETURNS TRIGGER LANGUAGE plpgsql AS $$
+        BEGIN
+          RAISE EXCEPTION 'Attendance logs are append-only.' USING ERRCODE = '52515';
+        END;
+        $$;
+        DROP TRIGGER IF EXISTS tr_attendance_logs_append_only ON "AttendanceLogs";
+        CREATE TRIGGER tr_attendance_logs_append_only
+          BEFORE UPDATE OR DELETE ON "AttendanceLogs"
+          FOR EACH ROW EXECUTE FUNCTION fn_tr_attendance_logs_append_only();
+      `);
+      try {
+        await q.deleteEvent(pool, eventId);
+        expect(await q.getEventById(pool, eventId)).toBeNull();
+      } finally {
+        await pool.query(`DROP TRIGGER IF EXISTS tr_attendance_logs_append_only ON "AttendanceLogs"`);
+      }
+    });
+  });
+
   describe('pure helpers', () => {
     it('computeDirection and pickWindowForTime', () => {
       expect(computeDirection([])).toBe('IN');

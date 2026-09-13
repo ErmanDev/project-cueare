@@ -435,7 +435,9 @@ adminRouter.delete(
     const id = parsePathId(req.params.id);
     const existing = await q.getEventById(getPool(), id);
     if (!existing) throw notFound('Event not found');
-    await q.deleteEvent(getPool(), id);
+    await withTransaction(getPool(), async (client) => {
+      await q.deleteEvent(client, id);
+    });
     service(req).invalidateEvent(id);
     res.status(204).end();
   }),
