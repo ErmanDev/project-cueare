@@ -1,17 +1,30 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CheckSquare, Plus, Printer, QrCode, Search, Square, Trash2, UserPlus, Users, X } from 'lucide-react'
+import { CheckSquare, Printer, QrCode, Search, Square, Trash2, UserPlus, Users, X } from 'lucide-react'
 
 import { ParticipantQrModal } from './ParticipantQrModal'
-import { Button, EmptyState, Modal, TableSkeleton } from './ui'
+import { Button, EmptyState, Field, Modal, TableSkeleton } from './ui'
 import { api } from '../lib/api'
 import { fmtYearLevel } from '../lib/format'
 import { useToast } from '../lib/toast'
-import type { Event, EventParticipant, Student, StudentPage } from '../lib/types'
+import type {
+  AcademicProgram,
+  AudienceScopeCode,
+  Event,
+  EventAudienceRule,
+  EventAudienceRuleInput,
+  EventParticipant,
+  Student,
+  StudentPage,
+} from '../lib/types'
 
 type SectionOption = {
   section_id: number
+  academic_program_id: number
+  program_code: string
+  year_level: number
   section_name: string
-  student_count: number
+  enrolled_student_count?: number
+  student_count?: number
 }
 
 export function EventRosterModal({
@@ -35,6 +48,11 @@ export function EventRosterModal({
 
   // Add state
   const [sections, setSections] = useState<SectionOption[]>([])
+  const [programs, setPrograms] = useState<AcademicProgram[]>([])
+  const [audienceRules, setAudienceRules] = useState<EventAudienceRule[]>([])
+  const [selectionMode, setSelectionMode] = useState<AudienceScopeCode>('ALL_STUDENTS')
+  const [selectedProgramId, setSelectedProgramId] = useState<string>('')
+  const [selectedYearLevel, setSelectedYearLevel] = useState<string>('')
   const [selectedSectionId, setSelectedSectionId] = useState<string>('')
   const [studentSearch, setStudentSearch] = useState('')
   const [availableStudents, setAvailableStudents] = useState<Student[]>([])
@@ -71,6 +89,35 @@ export function EventRosterModal({
     }
   }
 
+  async function loadPrograms() {
+    try {
+      const list = await api.get<AcademicProgram[]>('/admin/academic-programs', { active_only: 1 })
+      setPrograms(list)
+    } catch {
+      setPrograms([])
+    }
+  }
+
+  async function loadAudienceRules() {
+    try {
+      const res = await api.get<{ audience_rules: EventAudienceRule[] }>(`/admin/events/${event.id}/audience-rules`)
+      setAudienceRules(res.audience_rules)
+      const first = res.audience_rules[0]
+      if (!first) return
+      if (res.audience_rules.every((r) => r.audience_scope_code === 'STUDENT')) {
+        setSelectionMode('STUDENT')
+        setSelectedStudentIds(new Set(res.audience_rules.map((r) => r.student_id).filter((id): id is number => id != null)))
+        return
+      }
+      setSelectionMode(first.audience_scope_code)
+      setSelectedProgramId(first.academic_program_id != null ? String(first.academic_program_id) : '')
+      setSelectedYearLevel(first.year_level != null ? String(first.year_level) : '')
+      setSelectedSectionId(first.section_id != null ? String(first.section_id) : '')
+    } catch {
+      setAudienceRules([])
+    }
+  }
+
   async function searchStudents() {
     setSearchLoading(true)
     try {
@@ -89,6 +136,8 @@ export function EventRosterModal({
   useEffect(() => {
     void loadRoster()
     void loadSections()
+    void loadPrograms()
+    void loadAudienceRules()
   }, [])
 
   useEffect(() => {
@@ -119,46 +168,76 @@ export function EventRosterModal({
     }
   }
 
-  async function handleEnrollSection() {
-    if (!selectedSectionId) {
-      toast('Please select a section', 'error')
-      return
+  function buildAudienceRules(): EventAudienceRuleInput[] | null {
+    if (selectionMode === 'ALL_STUDENTS') return [{ audience_scope_code: 'ALL_STUDENTS', is_required: true }]
+    if (selectionMode === 'PROGRAM') {
+      if (!selectedProgramId) {
+        toast('Select a program', 'error')
+        return null
+      }
+      return [{ audience_scope_code: 'PROGRAM', academic_program_id: Number(selectedProgramId), is_required: true }]
     }
-    const sec = sections.find((s) => String(s.section_id) === selectedSectionId)
-    setEnrolling(true)
-    try {
-      const res = await api.post<{ added_count: number; total_participants: number }>(
-        `/admin/events/${event.id}/participants`,
-        { section_id: Number(selectedSectionId) },
-      )
-      toast(`Enrolled section ${sec?.section_name ?? ''}! (${res.added_count} new participants)`)
-      setSelectedSectionId('')
-      void loadRoster()
-      onUpdated()
-    } catch (err) {
-      toast(err instanceof Error ? err.message : 'Section enrollment failed', 'error')
-    } finally {
-      setEnrolling(false)
+    if (selectionMode === 'YEAR_LEVEL') {
+      if (!selectedYearLevel) {
+        toast('Select a year level', 'error')
+        return null
+      }
+      return [{ audience_scope_code: 'YEAR_LEVEL', year_level: Number(selectedYearLevel), is_required: true }]
     }
+    if (selectionMode === 'PROGRAM_YEAR_LEVEL') {
+      if (!selectedProgramId || !selectedYearLevel) {
+        toast('Select a program and year level', 'error')
+        return null
+      }
+      return [{
+        audience_scope_code: 'PROGRAM_YEAR_LEVEL',
+        academic_program_id: Number(selectedProgramId),
+        year_level: Number(selectedYearLevel),
+        is_required: true,
+      }]
+    }
+    if (selectionMode === 'SECTION') {
+      const section = sections.find((s) => String(s.section_id) === selectedSectionId)
+      if (!section) {
+        toast('Select a section', 'error')
+        return null
+      }
+      return [{
+        audience_scope_code: 'SECTION',
+        academic_program_id: section.academic_program_id,
+        year_level: section.year_level,
+        section_id: section.section_id,
+        is_required: true,
+      }]
+    }
+    if (selectedStudentIds.size === 0) {
+      toast('Select at least one student', 'error')
+      return null
+    }
+    return Array.from(selectedStudentIds).map((studentId) => ({
+      audience_scope_code: 'STUDENT',
+      student_id: studentId,
+      is_required: true,
+    }))
   }
 
-  async function handleEnrollSelectedStudents() {
-    if (selectedStudentIds.size === 0) {
-      toast('Select at least one student to enroll', 'error')
-      return
-    }
+  async function saveAudienceSelection(generate: boolean) {
+    const rules = buildAudienceRules()
+    if (!rules) return
     setEnrolling(true)
     try {
-      const res = await api.post<{ added_count: number; total_participants: number }>(
-        `/admin/events/${event.id}/participants`,
-        { student_ids: Array.from(selectedStudentIds) },
-      )
-      toast(`Enrolled ${res.added_count} student(s) to roster!`)
-      setSelectedStudentIds(new Set())
-      void loadRoster()
-      onUpdated()
+      await api.put(`/admin/events/${event.id}/audience-rules`, { audience_rules: rules })
+      await loadAudienceRules()
+      if (generate) {
+        const res = await api.post<{ participant_count: number }>(`/admin/events/${event.id}/participants/sync`, {})
+        toast(`Saved selection and generated ${res.participant_count} registration(s) with QR passes`)
+        void loadRoster()
+        onUpdated()
+      } else {
+        toast('Participant selection saved')
+      }
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Student enrollment failed', 'error')
+      toast(err instanceof Error ? err.message : 'Participant selection failed', 'error')
     } finally {
       setEnrolling(false)
     }
@@ -311,38 +390,85 @@ export function EventRosterModal({
         </>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-          {/* Enroll Section Option */}
           <div className="card" style={{ padding: '1rem', background: '#f8fafc', border: '1px solid #cbd5e1' }}>
-            <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '0.95rem', color: '#1e293b' }}>Enroll Entire Section</h4>
-            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-              <select
-                className="filter-control"
-                style={{ flex: 1 }}
-                value={selectedSectionId}
-                onChange={(e) => setSelectedSectionId(e.target.value)}
-              >
-                <option value="">Select section to enroll...</option>
-                {sections.map((s) => (
-                  <option key={s.section_id} value={s.section_id}>
-                    {s.section_name} ({s.student_count} students)
-                  </option>
-                ))}
-              </select>
-              <Button onClick={() => void handleEnrollSection()} disabled={!selectedSectionId || enrolling}>
-                <Plus size={16} /> {enrolling ? 'Enrolling...' : 'Enroll Section'}
+            <h4 style={{ margin: '0 0 0.75rem 0', fontSize: '0.95rem', color: '#1e293b' }}>Participant Selection</h4>
+            {audienceRules.length > 0 ? (
+              <p className="field-note" style={{ marginTop: 0 }}>
+                Saved rules: {audienceRules.map((r) => {
+                  if (r.audience_scope_code === 'ALL_STUDENTS') return 'All enrolled students'
+                  if (r.audience_scope_code === 'PROGRAM') return `Program ${r.program_code ?? r.academic_program_id}`
+                  if (r.audience_scope_code === 'YEAR_LEVEL') return `Year ${r.year_level}`
+                  if (r.audience_scope_code === 'PROGRAM_YEAR_LEVEL') return `${r.program_code ?? r.academic_program_id} year ${r.year_level}`
+                  if (r.audience_scope_code === 'SECTION') return r.section_name ?? `Section ${r.section_id}`
+                  return `${r.student_number ?? r.student_id}`
+                }).join(', ')}
+              </p>
+            ) : null}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
+              <Field label="Selection">
+                <select value={selectionMode} onChange={(e) => setSelectionMode(e.target.value as AudienceScopeCode)}>
+                  <option value="ALL_STUDENTS">All enrolled students</option>
+                  <option value="PROGRAM">By program</option>
+                  <option value="YEAR_LEVEL">By year level</option>
+                  <option value="PROGRAM_YEAR_LEVEL">By program and year level</option>
+                  <option value="SECTION">By section</option>
+                  <option value="STUDENT">Select individual students</option>
+                </select>
+              </Field>
+              {selectionMode === 'PROGRAM' || selectionMode === 'PROGRAM_YEAR_LEVEL' ? (
+                <Field label="Program">
+                  <select value={selectedProgramId} onChange={(e) => setSelectedProgramId(e.target.value)}>
+                    <option value="">Select program...</option>
+                    {programs.map((p) => (
+                      <option key={p.academic_program_id} value={p.academic_program_id}>
+                        {p.program_code} - {p.program_name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              ) : null}
+              {selectionMode === 'YEAR_LEVEL' || selectionMode === 'PROGRAM_YEAR_LEVEL' ? (
+                <Field label="Year Level">
+                  <select value={selectedYearLevel} onChange={(e) => setSelectedYearLevel(e.target.value)}>
+                    <option value="">Select year...</option>
+                    {[1, 2, 3, 4, 5].map((year) => (
+                      <option key={year} value={year}>Year {year}</option>
+                    ))}
+                  </select>
+                </Field>
+              ) : null}
+              {selectionMode === 'SECTION' ? (
+                <Field label="Section">
+                  <select value={selectedSectionId} onChange={(e) => setSelectedSectionId(e.target.value)}>
+                    <option value="">Select section...</option>
+                    {sections.map((s) => (
+                      <option key={s.section_id} value={s.section_id}>
+                        {s.program_code} Y{s.year_level} - {s.section_name} ({s.enrolled_student_count ?? s.student_count ?? 0} students)
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              ) : null}
+            </div>
+            <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.9rem', flexWrap: 'wrap' }}>
+              <Button variant="secondary" onClick={() => void saveAudienceSelection(false)} disabled={enrolling}>
+                Save Selection
+              </Button>
+              <Button onClick={() => void saveAudienceSelection(true)} disabled={enrolling}>
+                Generate Roster & QR
               </Button>
             </div>
           </div>
 
-          {/* Enroll Individual Students Option */}
+          {selectionMode === 'STUDENT' ? (
           <div className="card" style={{ padding: '1rem', background: '#ffffff', border: '1px solid #cbd5e1' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
               <h4 style={{ margin: 0, fontSize: '0.95rem', color: '#1e293b' }}>Select Specific Students</h4>
               <Button
-                onClick={() => void handleEnrollSelectedStudents()}
+                onClick={() => void saveAudienceSelection(true)}
                 disabled={selectedStudentIds.size === 0 || enrolling}
               >
-                Enroll Selected ({selectedStudentIds.size})
+                Generate Selected ({selectedStudentIds.size})
               </Button>
             </div>
 
@@ -418,6 +544,7 @@ export function EventRosterModal({
               )}
             </div>
           </div>
+          ) : null}
         </div>
       )}
 

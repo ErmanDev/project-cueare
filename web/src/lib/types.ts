@@ -61,6 +61,43 @@ export type EventParticipantToken = {
   section: string | null
 }
 
+export type AudienceScopeCode =
+  | 'ALL_STUDENTS'
+  | 'PROGRAM'
+  | 'YEAR_LEVEL'
+  | 'PROGRAM_YEAR_LEVEL'
+  | 'SECTION'
+  | 'STUDENT'
+
+export type EventAudienceRule = {
+  event_audience_rule_id: number
+  event_id: number
+  academic_term_id: number
+  audience_scope_code: AudienceScopeCode
+  academic_program_id: number | null
+  section_id: number | null
+  year_level: number | null
+  student_id: number | null
+  is_required: boolean
+  created_by_user_id: number
+  created_at_utc: string
+  program_code: string | null
+  program_name: string | null
+  section_name: string | null
+  student_number: string | null
+  first_name: string | null
+  last_name: string | null
+}
+
+export type EventAudienceRuleInput = {
+  audience_scope_code: AudienceScopeCode
+  academic_program_id?: number | null
+  section_id?: number | null
+  year_level?: number | null
+  student_id?: number | null
+  is_required?: boolean
+}
+
 export type StudentPage = {
   students: Student[]
   total: number

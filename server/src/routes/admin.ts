@@ -305,6 +305,12 @@ adminRouter.post(
     const existing = await q.getEventById(getPool(), id);
     if (!existing) throw notFound('Event not found');
     await withTransaction(getPool(), async (client) => {
+      const rules = await q.listEventAudienceRules(client, id);
+      if (rules.length === 0) {
+        await q.replaceEventAudienceRules(client, id, req.auth!.id, [
+          { audienceScopeCode: 'ALL_STUDENTS', isRequired: true },
+        ]);
+      }
       await q.ensureEventRoster(client, id, req.auth!.id);
       await q.upsertEventParticipantTokens(client, id, req.auth!.id);
     });
@@ -314,6 +320,61 @@ adminRouter.post(
       participant_count: count,
       synced_at: new Date().toISOString(),
     });
+  }),
+);
+
+function parseAudienceRules(body: Record<string, unknown>): q.EventAudienceRuleInput[] {
+  const raw = body.audience_rules;
+  if (!Array.isArray(raw)) throw badRequest('audience_rules must be an array');
+  return raw.map((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      throw badRequest('Each audience rule must be an object');
+    }
+    const rule = item as Record<string, unknown>;
+    const scope = requireString(rule, 'audience_scope_code').toUpperCase() as q.EventAudienceScopeCode;
+    if (!['ALL_STUDENTS', 'PROGRAM', 'YEAR_LEVEL', 'PROGRAM_YEAR_LEVEL', 'SECTION', 'STUDENT'].includes(scope)) {
+      throw badRequest('Invalid audience_scope_code');
+    }
+    return {
+      audienceScopeCode: scope,
+      academicProgramId: optionalInt(rule, 'academic_program_id'),
+      sectionId: optionalInt(rule, 'section_id'),
+      yearLevel: optionalInt(rule, 'year_level'),
+      studentId: optionalInt(rule, 'student_id'),
+      isRequired: optionalBool(rule, 'is_required') ?? true,
+    };
+  });
+}
+
+adminRouter.get(
+  '/events/:id/audience-rules',
+  asyncHandler(async (req, res) => {
+    const id = parsePathId(req.params.id);
+    const existing = await q.getEventById(getPool(), id);
+    if (!existing) throw notFound('Event not found');
+    const rules = await q.listEventAudienceRules(getPool(), id);
+    res.json({ event_id: id, audience_rules: rules });
+  }),
+);
+
+adminRouter.put(
+  '/events/:id/audience-rules',
+  asyncHandler(async (req, res) => {
+    const id = parsePathId(req.params.id);
+    const existing = await q.getEventById(getPool(), id);
+    if (!existing) throw notFound('Event not found');
+    const rules = parseAudienceRules(jsonObject(req));
+    let saved = 0;
+    try {
+      saved = await withTransaction(getPool(), (client) =>
+        q.replaceEventAudienceRules(client, id, req.auth!.id, rules),
+      );
+    } catch (err) {
+      if (err instanceof Error && /^Invalid audience rule/.test(err.message)) throw badRequest(err.message);
+      throw err;
+    }
+    const audienceRules = await q.listEventAudienceRules(getPool(), id);
+    res.json({ event_id: id, saved_count: saved, audience_rules: audienceRules });
   }),
 );
 
@@ -343,8 +404,28 @@ adminRouter.post(
 
     const addedCount = await withTransaction(getPool(), async (client) => {
       let added = 0;
-      if (sectionId) added += await q.addSectionToEvent(client, id, sectionId, req.auth!.id);
-      if (studentIds.length > 0) added += await q.addParticipantsToEvent(client, id, studentIds, req.auth!.id);
+      const audienceRules: q.EventAudienceRuleInput[] = [];
+      if (sectionId) {
+        const section = await q.getSectionStudentBreakdown(client, sectionId);
+        if (!section) throw notFound('Section not found');
+        audienceRules.push({
+          audienceScopeCode: 'SECTION',
+          academicProgramId: section.academic_program_id,
+          yearLevel: section.year_level,
+          sectionId,
+          isRequired: true,
+        });
+        added += await q.addSectionToEvent(client, id, sectionId, req.auth!.id);
+      }
+      if (studentIds.length > 0) {
+        for (const studentId of studentIds) {
+          audienceRules.push({ audienceScopeCode: 'STUDENT', studentId, isRequired: true });
+        }
+        added += await q.addParticipantsToEvent(client, id, studentIds, req.auth!.id);
+      }
+      if (audienceRules.length > 0) {
+        await q.replaceEventAudienceRules(client, id, req.auth!.id, audienceRules);
+      }
       await q.upsertEventParticipantTokens(client, id, req.auth!.id);
       return added;
     });

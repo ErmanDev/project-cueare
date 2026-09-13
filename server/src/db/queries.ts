@@ -819,11 +819,152 @@ async function eventStatusCode(db: Queryable, eventId: number): Promise<string> 
   return row.status;
 }
 
+export type EventAudienceScopeCode =
+  | 'ALL_STUDENTS'
+  | 'PROGRAM'
+  | 'YEAR_LEVEL'
+  | 'PROGRAM_YEAR_LEVEL'
+  | 'SECTION'
+  | 'STUDENT';
+
+export type EventAudienceRuleInput = {
+  audienceScopeCode: EventAudienceScopeCode;
+  academicProgramId?: number | null;
+  sectionId?: number | null;
+  yearLevel?: number | null;
+  studentId?: number | null;
+  isRequired?: boolean;
+};
+
+export type EventAudienceRuleRow = {
+  event_audience_rule_id: number;
+  event_id: number;
+  academic_term_id: number;
+  audience_scope_code: EventAudienceScopeCode;
+  academic_program_id: number | null;
+  section_id: number | null;
+  year_level: number | null;
+  student_id: number | null;
+  is_required: boolean;
+  created_by_user_id: number;
+  created_at_utc: string;
+  program_code: string | null;
+  program_name: string | null;
+  section_name: string | null;
+  student_number: string | null;
+  first_name: string | null;
+  last_name: string | null;
+};
+
+export async function listEventAudienceRules(db: Queryable, eventId: number): Promise<EventAudienceRuleRow[]> {
+  return many<EventAudienceRuleRow>(
+    db,
+    `SELECT
+       ar.${q('eventAudienceRuleId')} AS event_audience_rule_id,
+       ar.${q('eventId')} AS event_id,
+       ar.${q('academicTermId')} AS academic_term_id,
+       ar.${q('audienceScopeCode')} AS audience_scope_code,
+       ar.${q('academicProgramId')} AS academic_program_id,
+       ar.${q('sectionId')} AS section_id,
+       ar.${q('yearLevel')} AS year_level,
+       ar.${q('studentId')} AS student_id,
+       ar.${q('isRequired')} AS is_required,
+       ar.${q('createdByUserId')} AS created_by_user_id,
+       ar.${q('createdAtUtc')} AS created_at_utc,
+       p.${q('programCode')} AS program_code,
+       p.${q('programName')} AS program_name,
+       sec.${q('sectionName')} AS section_name,
+       s.${q('studentNumber')} AS student_number,
+       s.${q('firstName')} AS first_name,
+       s.${q('lastName')} AS last_name
+     FROM ${q('EventAudienceRules')} ar
+     LEFT JOIN ${q('AcademicPrograms')} p ON p.${q('academicProgramId')} = ar.${q('academicProgramId')}
+     LEFT JOIN ${q('Sections')} sec ON sec.${q('sectionId')} = ar.${q('sectionId')}
+     LEFT JOIN ${q('Students')} s ON s.${q('studentId')} = ar.${q('studentId')}
+     WHERE ar.${q('eventId')} = $1
+     ORDER BY ar.${q('eventAudienceRuleId')}`,
+    [eventId],
+  );
+}
+
+function normaliseAudienceRule(rule: EventAudienceRuleInput): EventAudienceRuleInput {
+  const scope = rule.audienceScopeCode;
+  const academicProgramId = rule.academicProgramId ?? null;
+  const sectionId = rule.sectionId ?? null;
+  const yearLevel = rule.yearLevel ?? null;
+  const studentId = rule.studentId ?? null;
+  if (scope === 'ALL_STUDENTS') return { audienceScopeCode: scope, isRequired: rule.isRequired ?? true };
+  if (scope === 'PROGRAM' && academicProgramId) {
+    return { audienceScopeCode: scope, academicProgramId, isRequired: rule.isRequired ?? true };
+  }
+  if (scope === 'YEAR_LEVEL' && yearLevel) {
+    return { audienceScopeCode: scope, yearLevel, isRequired: rule.isRequired ?? true };
+  }
+  if (scope === 'PROGRAM_YEAR_LEVEL' && academicProgramId && yearLevel) {
+    return { audienceScopeCode: scope, academicProgramId, yearLevel, isRequired: rule.isRequired ?? true };
+  }
+  if (scope === 'SECTION' && academicProgramId && sectionId && yearLevel) {
+    return { audienceScopeCode: scope, academicProgramId, sectionId, yearLevel, isRequired: rule.isRequired ?? true };
+  }
+  if (scope === 'STUDENT' && studentId) {
+    return { audienceScopeCode: scope, studentId, isRequired: rule.isRequired ?? true };
+  }
+  throw new Error(`Invalid audience rule for ${scope}`);
+}
+
+export async function replaceEventAudienceRules(
+  db: Queryable,
+  eventId: number,
+  actorUserId: number,
+  rules: EventAudienceRuleInput[],
+): Promise<number> {
+  const termId = await eventTermId(db, eventId);
+  await db.query(`DELETE FROM ${q('EventAudienceRules')} WHERE ${q('eventId')} = $1`, [eventId]);
+  let inserted = 0;
+  for (const raw of rules) {
+    const rule = normaliseAudienceRule(raw);
+    const result = await db.query(
+      `INSERT INTO ${q('EventAudienceRules')} (
+         ${q('eventId')}, ${q('academicTermId')}, ${q('audienceScopeCode')},
+         ${q('academicProgramId')}, ${q('sectionId')}, ${q('yearLevel')}, ${q('studentId')},
+         ${q('isRequired')}, ${q('createdByUserId')})
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        eventId,
+        termId,
+        rule.audienceScopeCode,
+        rule.academicProgramId ?? null,
+        rule.sectionId ?? null,
+        rule.yearLevel ?? null,
+        rule.studentId ?? null,
+        rule.isRequired ?? true,
+        actorUserId,
+      ],
+    );
+    inserted += result.rowCount ?? 0;
+  }
+  return inserted;
+}
+
+async function eventAudienceRuleCount(db: Queryable, eventId: number): Promise<number> {
+  const row = await one<{ count: number }>(
+    db,
+    `SELECT COUNT(*)::int AS count FROM ${q('EventAudienceRules')} WHERE ${q('eventId')} = $1`,
+    [eventId],
+  );
+  return row?.count ?? 0;
+}
+
 export async function ensureEventRoster(
   db: Queryable,
   eventId: number,
   actorUserId: number,
 ): Promise<void> {
+  if ((await eventAudienceRuleCount(db, eventId)) > 0) {
+    await registerEventStudentsFromAudienceRules(db, eventId, actorUserId);
+    await syncEventSessionParticipants(db, eventId, actorUserId);
+    return;
+  }
   const students = await many<{ student_id: number }>(
     db,
     `SELECT ${q('studentId')} AS student_id FROM ${q('Students')} WHERE ${q('isActive')} = true`,
@@ -833,6 +974,58 @@ export async function ensureEventRoster(
   }
   await registerEventStudents(db, eventId, actorUserId);
   await syncEventSessionParticipants(db, eventId, actorUserId);
+}
+
+async function registerEventStudentsFromAudienceRules(
+  db: Queryable,
+  eventId: number,
+  actorUserId: number,
+): Promise<number> {
+  const result = await db.query(
+    `WITH matched AS (
+       SELECT DISTINCT ON (se.${q('studentId')})
+         ar.${q('eventAudienceRuleId')},
+         ar.${q('isRequired')},
+         se.${q('studentEnrollmentId')},
+         se.${q('studentId')}
+       FROM ${q('EventAudienceRules')} ar
+       JOIN ${q('Events')} e ON e.${q('eventId')} = ar.${q('eventId')}
+       JOIN ${q('StudentEnrollments')} se ON se.${q('academicTermId')} = e.${q('academicTermId')}
+       JOIN ${q('Students')} s ON s.${q('studentId')} = se.${q('studentId')}
+       WHERE ar.${q('eventId')} = $1
+         AND se.${q('effectiveToUtc')} IS NULL
+         AND se.${q('enrollmentStatusCode')} = 'ENROLLED'
+         AND s.${q('isActive')} = true
+         AND (
+           ar.${q('audienceScopeCode')} = 'ALL_STUDENTS'
+           OR (ar.${q('audienceScopeCode')} = 'PROGRAM'
+             AND se.${q('academicProgramId')} = ar.${q('academicProgramId')})
+           OR (ar.${q('audienceScopeCode')} = 'YEAR_LEVEL'
+             AND se.${q('yearLevel')} = ar.${q('yearLevel')})
+           OR (ar.${q('audienceScopeCode')} = 'PROGRAM_YEAR_LEVEL'
+             AND se.${q('academicProgramId')} = ar.${q('academicProgramId')}
+             AND se.${q('yearLevel')} = ar.${q('yearLevel')})
+           OR (ar.${q('audienceScopeCode')} = 'SECTION'
+             AND se.${q('academicProgramId')} = ar.${q('academicProgramId')}
+             AND se.${q('yearLevel')} = ar.${q('yearLevel')}
+             AND se.${q('sectionId')} = ar.${q('sectionId')})
+           OR (ar.${q('audienceScopeCode')} = 'STUDENT'
+             AND se.${q('studentId')} = ar.${q('studentId')})
+         )
+       ORDER BY se.${q('studentId')}, ar.${q('eventAudienceRuleId')}
+     )
+     INSERT INTO ${q('EventRegistrations')} (
+       ${q('eventId')}, ${q('studentEnrollmentId')}, ${q('studentId')},
+       ${q('isRequired')}, ${q('sourceAudienceRuleId')}, ${q('registeredByUserId')})
+     SELECT $1, ${q('studentEnrollmentId')}, ${q('studentId')}, ${q('isRequired')}, ${q('eventAudienceRuleId')}, $2
+     FROM matched
+     ON CONFLICT (${q('eventId')}, ${q('studentId')}) DO UPDATE
+     SET ${q('isRequired')} = EXCLUDED.${q('isRequired')},
+         ${q('sourceAudienceRuleId')} = EXCLUDED.${q('sourceAudienceRuleId')},
+         ${q('registrationStatusCode')} = 'ACTIVE'`,
+    [eventId, actorUserId],
+  );
+  return result.rowCount ?? 0;
 }
 
 async function registerEventStudents(
@@ -2795,7 +2988,7 @@ export type CompositeSessionInput = {
 };
 
 export type CompositeAudienceRuleInput = {
-  audienceScopeCode: 'ALL_STUDENTS' | 'PROGRAM' | 'YEAR_LEVEL' | 'SECTION' | 'STUDENT';
+  audienceScopeCode: EventAudienceScopeCode;
   academicProgramId?: number | null;
   sectionId?: number | null;
   yearLevel?: number | null;
@@ -3103,15 +3296,7 @@ export async function publishEventRoster(
   eventId: number,
   actorUserId: number,
 ): Promise<{ newRegistrationsCount: number; newParticipantsCount: number }> {
-  const procedure = await one<{ available: string | null }>(
-    db,
-    `SELECT to_regprocedure('ssc.sp_event_roster_generate_from_audience_rules(bigint,integer,integer,integer)')::text AS available`,
-  );
-  if (procedure?.available) {
-    await db.query(`CALL ssc.sp_event_roster_generate_from_audience_rules($1, $2, 0, 0)`, [eventId, actorUserId]);
-  } else {
-    await ensureEventRoster(db, eventId, actorUserId);
-  }
+  await ensureEventRoster(db, eventId, actorUserId);
   await db.query(
     `UPDATE ${q('EventParticipants')} ep
      SET ${q('eventRegistrationId')} = er.${q('eventRegistrationId')}
