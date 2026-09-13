@@ -32,6 +32,14 @@ export type EventParticipant = {
   year_level: number | null
   section: string | null
   added_at: string
+  sessions?: Array<{
+    session_id: number
+    session_name: string
+    session_date: string
+    status: string
+    checked_in_at_utc: string | null
+    checked_out_at_utc: string | null
+  }>
 }
 
 export type EventParticipantToken = {
@@ -64,6 +72,7 @@ export type SessionWindow = {
   id: number
   event_id: number
   session_label: string
+  session_date?: string | null
   start_time: string
   end_time: string
   late_after?: string | null
@@ -71,6 +80,7 @@ export type SessionWindow = {
   out_start?: string | null
   out_end?: string | null
   requires_checkout?: boolean
+  is_closed?: boolean
   sort_order: number
 }
 
@@ -87,6 +97,7 @@ export type Event = {
   id: number
   name: string
   event_date: string
+  last_session_date?: string
   is_active: boolean
   is_expired?: boolean
   created_by?: number
@@ -156,6 +167,7 @@ export type ImportResult = {
 export type WindowDraft = {
   id?: number
   label: string
+  session_date?: string
   start: string
   end: string
   late_after?: string
@@ -223,3 +235,35 @@ export type SectionBreakdown = Section & {
   students: SectionStudent[]
 }
 
+export type AcademicProgram = {
+  academic_program_id: number
+  program_code: string
+  program_name: string
+  is_active?: boolean
+  created_at_utc?: string
+}
+
+export type AcademicTerm = {
+  academic_term_id: number
+  academic_year_id: number
+  term_code: string
+  term_name: string
+  starts_on: string
+  ends_on: string
+  is_active: boolean
+  created_at_utc?: string
+  year_code?: string
+  year_name?: string
+  programs: AcademicProgram[]
+}
+
+export type AcademicYear = {
+  academic_year_id: number
+  year_code: string
+  year_name?: string
+  starts_on?: string
+  ends_on?: string
+  is_active: boolean
+  created_at_utc?: string
+  terms: AcademicTerm[]
+}

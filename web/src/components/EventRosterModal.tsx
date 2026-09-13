@@ -249,6 +249,7 @@ export function EventRosterModal({
                     <th>Name</th>
                     <th>Course & Year</th>
                     <th>Section</th>
+                    <th>Session attendance</th>
                     <th style={{ textAlign: 'right' }}>Action</th>
                   </tr>
                 </thead>
@@ -263,6 +264,24 @@ export function EventRosterModal({
                         {p.course || '—'} {fmtYearLevel(p.year_level)}
                       </td>
                       <td>{p.section ? <span className="chip chip-window">{p.section}</span> : <span className="muted">—</span>}</td>
+                      <td>
+                        <div style={{ display: 'grid', gap: '0.3rem', minWidth: '180px' }}>
+                          {p.sessions?.map((session) => (
+                            <div key={session.session_id} style={{ fontSize: '0.75rem' }}>
+                              <strong>{session.session_date} {session.session_name}</strong>{' '}
+                              <span className={`chip ${session.status === 'ABSENT' ? 'chip-inactive' : session.status === 'PENDING' ? 'chip-window' : 'chip-active'}`}>
+                                {session.status}
+                              </span>
+                              {session.checked_in_at_utc ? (
+                                <div className="muted">
+                                  IN {new Date(session.checked_in_at_utc).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                  {session.checked_out_at_utc ? ` · OUT ${new Date(session.checked_out_at_utc).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
+                                </div>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      </td>
                       <td>
                         <div className="menu end">
                           <button

@@ -4,6 +4,7 @@ import type { Pool } from 'pg';
 import { AttendanceService, computeDirection, pickWindowForTime } from '../src/attendance/service.ts';
 import { getConfig } from '../src/config.ts';
 import { createPool, ensureSchema } from '../src/db/pool.ts';
+import { backfillEventRegistrations } from '../src/db/schema.ts';
 import * as q from '../src/db/queries.ts';
 import { DIRECTION } from '../src/types.ts';
 import { ApiError } from '../src/utils/errors.ts';
@@ -122,6 +123,121 @@ describe('AttendanceService', () => {
       console.warn('Postgres not available — attendance integration tests skipped');
     }
     expect(true).toBe(true);
+  });
+
+  it('links one registration and QR pass to a participant in every session', async () => {
+    if (!dbReady) return;
+    const dayTwo = await q.insertWindow(pool, {
+      eventId,
+      sessionDate: new Date(2026, 8, 6),
+      sessionLabel: 'Day 2 Morning',
+      startTime: '07:00',
+      endTime: '12:00',
+      sortOrder: 2,
+    });
+    await q.syncRegisteredEventSessions(pool, eventId, adminId);
+    service.invalidateEvent(eventId);
+
+    const registrations = await pool.query(
+      'SELECT "eventRegistrationId" FROM "EventRegistrations" WHERE "eventId" = $1 AND "studentId" = $2',
+      [eventId, studentId],
+    );
+    const participants = await pool.query(
+      'SELECT "eventRegistrationId" FROM "EventParticipants" WHERE "studentId" = $1',
+      [studentId],
+    );
+    const credentials = await pool.query(
+      'SELECT "eventRegistrationId" FROM "EventParticipantQrCredentials"',
+    );
+    expect(registrations.rowCount).toBe(1);
+    expect(participants.rowCount).toBe(3);
+    expect(participants.rows.every((row) => row.eventRegistrationId === registrations.rows[0].eventRegistrationId)).toBe(true);
+    expect(credentials.rows[0].eventRegistrationId).toBe(registrations.rows[0].eventRegistrationId);
+    await backfillEventRegistrations(pool);
+    await backfillEventRegistrations(pool);
+    const afterRetry = await pool.query('SELECT COUNT(*)::int AS count FROM "EventRegistrations" WHERE "eventId" = $1', [eventId]);
+    expect(afterRetry.rows[0].count).toBe(1);
+
+    const [pass] = await q.listEventParticipantTokens(pool, eventId);
+    const preview = await service.preview({ eventId, qrPayload: pass!.token, sessionWindowId: morningId });
+    expect(preview.student.id).toBe(studentId);
+
+    fakeNow = new Date(2026, 8, 6, 8, 5);
+    const dayTwoPreview = await service.preview({ eventId, qrPayload: pass!.token });
+    expect(dayTwoPreview.direction.direction).toBe(DIRECTION.in);
+    expect(dayTwoPreview.window.id).toBe(dayTwo.id);
+    await q.revokeEventParticipantToken(pool, pass!.token_id, adminId);
+    await expectRejected(
+      service.preview({ eventId, qrPayload: pass!.token, sessionWindowId: dayTwo.id }),
+      { statusCode: 404 },
+    );
+
+    await q.closeSessionAndAssessFines(pool, dayTwo.id, adminId);
+    const absent = await pool.query(
+      'SELECT "attendanceStatusCode" FROM "AttendanceSessionStatus" WHERE "eventSessionId" = $1 AND "studentId" = $2',
+      [dayTwo.id, studentId],
+    );
+    expect(absent.rows[0].attendanceStatusCode).toBe('ABSENT');
+    const roster = await q.listEventParticipants(pool, eventId);
+    expect(roster.rows[0]?.sessions?.find((session) => session.session_id === dayTwo.id)?.status).toBe('ABSENT');
+    const lateStudent = await q.insertStudent(pool, {
+      studentIdCode: 'STU-2026-0002', fullName: 'Late Registrant', section: 'BSIT-3A', photoUrl: null,
+    });
+    await q.addParticipantsToEvent(pool, eventId, [lateStudent.id], adminId);
+    const lateRoster = await q.listEventParticipants(pool, eventId);
+    expect(lateRoster.rows.find((row) => row.student_id === lateStudent.id)?.sessions?.find((session) => session.session_id === dayTwo.id)?.status).toBe('ABSENT');
+  });
+
+  it('rejects scans outside roster and permits checkout during its cutoff', async () => {
+    if (!dbReady) return;
+    const unregistered = await q.insertStudent(pool, {
+      studentIdCode: 'STU-2026-9999',
+      fullName: 'Unregistered Student',
+      section: 'BSIT-3A',
+      photoUrl: null,
+    });
+    await expectRejected(
+      service.preview({ eventId, qrPayload: unregistered.student_id_code, sessionWindowId: morningId }),
+      { statusCode: 409 },
+    );
+    await q.updateWindow(pool, morningId, {
+      startTime: '07:00', endTime: '12:00', outEnd: '12:30',
+    });
+    service.invalidateEvent(eventId);
+    await service.confirm({ eventId, studentId, sessionWindowId: morningId, scannedBy: moderatorId });
+    fakeNow = new Date(2026, 8, 5, 12, 3);
+    const preview = await service.preview({ eventId, qrPayload: 'STU-2026-0001' });
+    expect(preview.direction.direction).toBe(DIRECTION.out);
+    await service.confirm({ eventId, studentId, sessionWindowId: morningId, scannedBy: moderatorId });
+    const record = await pool.query(
+      `SELECT ar."checkedInAtUtc", ar."checkedOutAtUtc" FROM "AttendanceRecords" ar
+       JOIN "EventParticipants" ep ON ep."eventParticipantId" = ar."eventParticipantId"
+       WHERE ep."eventSessionId" = $1 AND ep."studentId" = $2`,
+      [morningId, studentId],
+    );
+    expect(record.rowCount).toBe(1);
+    expect(record.rows[0].checkedOutAtUtc).toBeDefined();
+  });
+
+  it('backfills legacy session rows without losing scans or QR passes', async () => {
+    if (!dbReady) return;
+    await service.confirm({ eventId, studentId, sessionWindowId: morningId, scannedBy: moderatorId });
+    const [pass] = await q.listEventParticipantTokens(pool, eventId);
+    await pool.query('UPDATE "EventParticipants" SET "eventRegistrationId" = NULL WHERE "studentId" = $1', [studentId]);
+    await pool.query('DELETE FROM "EventParticipantQrCredentials"');
+    await pool.query('DELETE FROM "EventRegistrations" WHERE "eventId" = $1', [eventId]);
+
+    await backfillEventRegistrations(pool);
+    const restored = await pool.query(
+      `SELECT COUNT(*)::int AS count FROM "EventParticipants"
+       WHERE "studentId" = $1 AND "eventRegistrationId" IS NOT NULL`,
+      [studentId],
+    );
+    const scans = await pool.query('SELECT COUNT(*)::int AS count FROM "AttendanceLogs"');
+    const [restoredPass] = await q.listEventParticipantTokens(pool, eventId);
+    expect(restored.rows[0].count).toBe(2);
+    expect(scans.rows[0].count).toBe(1);
+    expect(restoredPass!.token).toBe(pass!.token);
   });
 
   describe('determineDirection', () => {

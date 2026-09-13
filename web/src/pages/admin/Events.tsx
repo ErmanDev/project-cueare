@@ -27,7 +27,7 @@ const PRESET_AFTERNOON: WindowDraft[] = [
   { label: 'Afternoon', start: '13:00', end: '17:00', late_after: '13:30', in_end: '14:30', out_start: '16:30', out_end: '17:30' },
 ]
 
-function validateWindows(windows: WindowDraft[]): string | null {
+function validateWindows(windows: WindowDraft[], eventDate: string): string | null {
   for (const w of windows) {
     if (!w.label.trim()) return 'Every session needs a label'
     if (minutes(w.start) >= minutes(w.end)) {
@@ -41,12 +41,17 @@ function validateWindows(windows: WindowDraft[]): string | null {
     for (let j = i + 1; j < windows.length; j++) {
       const a = windows[i]!
       const b = windows[j]!
-      if (minutes(a.start) < minutes(b.end) && minutes(b.start) < minutes(a.end)) {
+      if ((a.session_date || eventDate) === (b.session_date || eventDate)
+        && minutes(a.start) < minutes(b.end) && minutes(b.start) < minutes(a.end)) {
         return `"${a.label}" overlaps "${b.label}"`
       }
     }
   }
   return null
+}
+
+function hasSessionToday(event: Event): boolean {
+  return event.session_windows.some((w) => isToday(w.session_date || event.event_date))
 }
 
 function sessionLabel(code: string): string {
@@ -96,10 +101,21 @@ export function AdminEvents() {
   async function syncRoster(e: Event) {
     try {
       const res = await api.post<{ participant_count: number }>(`/admin/events/${e.id}/participants/sync`, {})
-      toast(`Synced roster! ${res.participant_count} registered participants for "${e.name}"`)
+      toast(`Roster and QR passes ready: ${res.participant_count} registrations for "${e.name}"`)
       await load()
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Roster sync failed', 'error')
+    }
+  }
+
+  async function closeSession(event: Event, sessionId: number, label: string) {
+    if (!window.confirm(`Close "${label}" for "${event.name}"? Unscanned registered students will be marked absent.`)) return
+    try {
+      await api.post(`/admin/events/${event.id}/session-windows/${sessionId}/close`)
+      toast(`Closed ${label}; unscanned students marked absent`)
+      await load()
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Session close failed', 'error')
     }
   }
 
@@ -129,7 +145,7 @@ export function AdminEvents() {
       }
       if (statusFilter === 'ACTIVE' && !e.is_active) return false
       if (statusFilter === 'INACTIVE' && e.is_active) return false
-      if (statusFilter === 'TODAY' && !isToday(e.event_date)) return false
+      if (statusFilter === 'TODAY' && !hasSessionToday(e)) return false
       return true
     })
   }, [events, search, statusFilter])
@@ -139,7 +155,7 @@ export function AdminEvents() {
       <div className="page-head">
         <div>
           <h2>Events Configuration</h2>
-          <p>Manage event schedules, session windows, and fine policy templates</p>
+          <p>Create event and sessions, generate registrations and QR passes, then track attendance for each session.</p>
         </div>
         <Button onClick={() => setEditing('new')}>
           <Plus size={18} /> New event
@@ -178,7 +194,7 @@ export function AdminEvents() {
             style={{ padding: '0.3rem 0.75rem', fontSize: '0.8rem', borderRadius: '16px' }}
             onClick={() => setStatusFilter('TODAY')}
           >
-            Today ({events?.filter((e) => isToday(e.event_date)).length ?? 0})
+            Today ({events?.filter(hasSessionToday).length ?? 0})
           </button>
           <button
             className={`btn ${statusFilter === 'ACTIVE' ? 'btn-primary' : 'btn-secondary'}`}
@@ -251,7 +267,7 @@ export function AdminEvents() {
               </thead>
               <tbody>
                 {filteredEvents.map((e) => {
-                  const today = isToday(e.event_date)
+                  const today = hasSessionToday(e)
                   return (
                     <tr key={e.id} className={today ? 'is-today' : undefined}>
                       <td>
@@ -275,9 +291,18 @@ export function AdminEvents() {
                         ) : (
                           <div className="windows">
                             {e.session_windows.map((w) => (
-                              <span key={w.id} className="chip chip-window" title={w.late_after ? `Late After: ${w.late_after}` : undefined}>
-                                {w.session_label} {fmtRange(w.start_time, w.end_time)}
-                                {w.late_after ? <small style={{ color: '#d97706', marginLeft: '0.25rem' }}>[Late &gt; {w.late_after}]</small> : null}
+                              <span key={w.id} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                                <span className="chip chip-window" title={w.late_after ? `Late After: ${w.late_after}` : undefined}>
+                                  {w.session_date ? `${w.session_date} · ` : ''}{w.session_label} {fmtRange(w.start_time, w.end_time)}
+                                  {w.late_after ? <small style={{ color: '#d97706', marginLeft: '0.25rem' }}>[Late &gt; {w.late_after}]</small> : null}
+                                </span>
+                                {w.is_closed ? (
+                                  <span className="chip chip-inactive">Closed</span>
+                                ) : (
+                                  <button type="button" className="chip chip-inactive" title={`Close ${w.session_label} and mark unscanned students absent`} onClick={() => void closeSession(e, w.id, w.session_label)}>
+                                    Close
+                                  </button>
+                                )}
                               </span>
                             ))}
                           </div>
@@ -315,7 +340,7 @@ export function AdminEvents() {
                           </button>
                           <button
                             className="icon-btn"
-                            title="Sync Participant Roster"
+                            title="Generate registrations, session roster, and QR passes"
                             onClick={() => void syncRoster(e)}
                             style={{ color: '#059669' }}
                           >
@@ -390,6 +415,7 @@ export function EventForm({
       ? existing.session_windows.map((w) => ({
           id: w.id,
           label: w.session_label,
+          session_date: w.session_date || ymd(existing.event_date),
           start: w.start_time,
           end: w.end_time,
           late_after: w.late_after ?? undefined,
@@ -415,7 +441,7 @@ export function EventForm({
   }, [])
 
   async function save() {
-    const err = validateWindows(windows)
+    const err = validateWindows(windows, date)
     if (err) {
       toast(err, 'error')
       return
@@ -429,6 +455,7 @@ export function EventForm({
         fine_template_id: templateId ? Number(templateId) : null,
         session_windows: windows.map((w) => ({
           id: w.id,
+          session_date: w.session_date || date,
           session_label: w.label,
           start_time: w.start,
           end_time: w.end,
@@ -469,6 +496,7 @@ export function EventForm({
     }
     const draft: WindowDraft = {
       label: `Session ${windows.length + 1}`,
+      session_date: windows.at(-1)?.session_date || date,
       start: nextStart,
       end: nextEnd,
       late_after: nextStart,
@@ -563,6 +591,14 @@ export function EventForm({
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Field label="Session Date">
+                <input
+                  type="date"
+                  value={w.session_date || date}
+                  onChange={(e) => setWindows((ws) => ws.map((x, j) => (j === i ? { ...x, session_date: e.target.value } : x)))}
+                  required
+                />
+              </Field>
               <Field label="Session Label">
                 <input
                   style={{ fontWeight: 600 }}

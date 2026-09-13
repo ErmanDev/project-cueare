@@ -33,3 +33,9 @@ Swagger: [http://127.0.0.1:8080/docs](http://127.0.0.1:8080/docs)
 OpenAPI JSON: [http://127.0.0.1:8080/openapi.json](http://127.0.0.1:8080/openapi.json)
 
 Use **Authorize** in Swagger after `POST /api/auth/login` and paste the JWT.
+
+## Event roster migration
+
+Server startup adds `EventRegistrations` and `EventParticipantQrCredentials`, then links existing session participants and QR passes to their registration. The backfill is safe to retry. Existing attendance records and printed UUID passes stay in place. New registrations create one participant per event session; closing a session creates an empty attendance record for each unscanned participant, reported as `ABSENT`.
+
+For an application rollback, deploy the previous server and web build while leaving the added tables and nullable `EventParticipants.eventRegistrationId` column in place. Remove those schema additions only after a separate data review and migration.

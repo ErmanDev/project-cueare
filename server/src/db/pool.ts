@@ -1,7 +1,7 @@
 import pg from 'pg';
 
 import { databaseDisplay, getConfig, type DatabaseConfig } from '../config.ts';
-import { addMissingAppColumns, addMissingConstraints, dropTenantsIfPresent, importLegacyData, migrateLegacyTables, renameSnakeToPascal, schemaStatements, seedFoundation } from './schema.ts';
+import { addMissingAppColumns, addMissingConstraints, backfillEventRegistrations, dropTenantsIfPresent, importLegacyData, migrateLegacyTables, renameSnakeToPascal, schemaStatements, seedFoundation } from './schema.ts';
 
 const { Pool, types } = pg;
 
@@ -85,6 +85,7 @@ export async function ensureSchema(
     await addMissingConstraints(client);
     await seedFoundation(client);
     await importLegacyData(client);
+    await backfillEventRegistrations(client);
   } finally {
     client.release();
   }

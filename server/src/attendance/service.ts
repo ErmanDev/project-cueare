@@ -180,10 +180,14 @@ export class AttendanceService {
   ensureSessionAcceptingScans(args: {
     event: EventRow;
     window: SessionWindowRow;
+    direction?: string;
     at?: Date;
   }): void {
     const t = args.at ?? this.now();
-    const eventDay = args.event.event_date;
+    const eventDay = args.window.session_date
+      ? new Date(`${args.window.session_date}T00:00:00`)
+      : args.event.event_date;
+    if (args.window.is_closed) throw conflict(`Session "${args.window.session_label}" is closed`);
     if (!isSameDay(t, eventDay)) {
       const y = String(eventDay.getFullYear()).padStart(4, '0');
       const m = String(eventDay.getMonth() + 1).padStart(2, '0');
@@ -214,10 +218,15 @@ export class AttendanceService {
         },
       );
     }
-    if (minutes >= end) {
+    const isOut = args.direction === DIRECTION.out;
+    const closes = parseMinutes(isOut ? args.window.out_end ?? args.window.end_time : args.window.in_end ?? args.window.end_time) ?? end;
+    const opens = isOut ? parseMinutes(args.window.out_start ?? args.window.start_time) ?? start : start;
+    if (minutes < opens) {
+      throw conflict(`Check-out for "${args.window.session_label}" has not opened yet`);
+    }
+    if (minutes >= closes) {
       throw conflict(
-        `Session "${args.window.session_label}" has already ended ` +
-          `(ended at ${args.window.end_time})`,
+        `${isOut ? 'Check-out' : 'Check-in'} for "${args.window.session_label}" has closed`,
         {
           code: 'SESSION_ENDED',
           session_label: args.window.session_label,
@@ -256,14 +265,15 @@ export class AttendanceService {
   }
 
   async ensureEventUsable(event: EventRow, db: Queryable = this.pool): Promise<EventRow> {
-    if (isPastDate(event.event_date, this.now())) {
+    const finalDate = event.last_session_date ?? event.event_date;
+    if (isPastDate(finalDate, this.now())) {
       if (event.is_active) {
         await q.deactivateEvent(db, event.id);
         this.catalog.invalidateEvent(event.id);
       }
-      throw conflict(`Event "${event.name}" date has passed and is no longer valid`, {
+      throw conflict(`Event "${event.name}" final session date has passed and is no longer valid`, {
         code: 'EVENT_DATE_PASSED',
-        event_date: event.event_date.toISOString(),
+        event_date: finalDate.toISOString(),
         server_time: this.now().toISOString(),
       });
     }
@@ -278,7 +288,7 @@ export class AttendanceService {
       db === this.pool ? await this.catalog.listActiveEvents() : await q.listActiveEvents(db);
     let count = 0;
     for (const event of active) {
-      if (!isPastDate(event.event_date, this.now())) continue;
+      if (!isPastDate(event.last_session_date ?? event.event_date, this.now())) continue;
       await q.deactivateEvent(db, event.id);
       count++;
     }
@@ -294,19 +304,33 @@ export class AttendanceService {
     const event = await this.catalog.getEventById(args.eventId);
     if (!event) throw notFound('Event not found');
     await this.ensureEventUsable(event);
-    const code = this.studentCodeFromPayload(args.qrPayload);
-    const student = await this.catalog.getStudentByCode(code);
+    requirePayloadSize(args.qrPayload);
+    const payload = args.qrPayload.trim();
+    const isToken = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(payload);
+    const token = isToken
+      ? await q.getEventParticipantByToken(this.pool, payload, args.eventId)
+      : null;
+    if (isToken && !token) {
+      throw notFound('QR pass is invalid or revoked for this event');
+    }
+    const code = token ? token.student_id_code : this.studentCodeFromPayload(payload);
+    const student = token
+      ? await q.getStudentById(this.pool, token.student_id)
+      : code ? await this.catalog.getStudentByCode(code) : null;
     if (!student) throw notFound(`No student found for code "${code}"`);
     const { window, mode } = await this.resolveWindow({
       eventId: args.eventId,
       overrideWindowId: args.sessionWindowId,
     });
-    this.ensureSessionAcceptingScans({ event, window });
+    if (!(await q.getRegisteredSessionParticipant(this.pool, args.eventId, student.id, window.id))) {
+      throw conflict('Student is not registered for this session');
+    }
     const direction = await this.determineDirection({
       eventId: args.eventId,
       studentId: student.id,
       sessionWindowId: window.id,
     });
+    this.ensureSessionAcceptingScans({ event, window, direction: direction.direction });
     return {
       student,
       event,
@@ -337,9 +361,11 @@ export class AttendanceService {
         if (!window || window.event_id !== args.eventId) {
           throw notFound('Session window not found for this event');
         }
-        this.ensureSessionAcceptingScans({ event, window });
         const student = await q.getStudentById(client, args.studentId);
         if (!student) throw notFound('Student not found');
+        if (!(await q.getRegisteredSessionParticipant(client, args.eventId, args.studentId, args.sessionWindowId))) {
+          throw conflict('Student is not registered for this session');
+        }
 
         const result = await this.determineDirection({
           eventId: args.eventId,
@@ -348,6 +374,7 @@ export class AttendanceService {
           db: client,
           forUpdate: true,
         });
+        this.ensureSessionAcceptingScans({ event, window, direction: result.direction });
         if (!result.canScan) {
           throw conflict(`Already timed IN & OUT for ${window.session_label}`, {
             code: 'ALREADY_COMPLETE',
@@ -391,7 +418,7 @@ export class AttendanceService {
       if (!window || window.event_id !== args.eventId) {
         throw notFound('Session window not found for this event');
       }
-      this.ensureSessionAcceptingScans({ event, window });
+      this.ensureSessionAcceptingScans({ event, window, direction: args.direction ?? DIRECTION.in });
 
       return q.insertAttendance(this.pool, {
         eventId: args.eventId,
@@ -408,6 +435,7 @@ export class AttendanceService {
 
   async validateWindow(args: {
     eventId: number;
+    sessionDate?: Date;
     startTime: string;
     endTime: string;
     excludeId?: number | null;
@@ -422,8 +450,12 @@ export class AttendanceService {
       throw badRequest('start_time must be before end_time');
     }
     const others = await this.windowsForEvent(args.eventId, args.db);
+    const date = args.sessionDate
+      ? `${args.sessionDate.getFullYear()}-${String(args.sessionDate.getMonth() + 1).padStart(2, '0')}-${String(args.sessionDate.getDate()).padStart(2, '0')}`
+      : null;
     for (const o of others) {
       if (o.id === args.excludeId) continue;
+      if (date && o.session_date && o.session_date !== date) continue;
       const os = parseMinutes(o.start_time);
       const oe = parseMinutes(o.end_time);
       if (os == null || oe == null) continue;
@@ -443,8 +475,10 @@ export function pickWindowForTime(
 ): SessionWindowRow | null {
   const minutes = minutesOfDay(at);
   for (const w of windows) {
+    if (w.is_closed) continue;
+    if (w.session_date && !isSameDay(at, new Date(`${w.session_date}T00:00:00`))) continue;
     const start = parseMinutes(w.start_time);
-    const end = parseMinutes(w.end_time);
+    const end = parseMinutes(w.out_end ?? w.end_time);
     if (start == null || end == null) continue;
     if (minutes >= start && minutes < end) return w;
   }

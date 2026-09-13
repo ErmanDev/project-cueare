@@ -38,13 +38,13 @@ moderatorRouter.get(
     const events = await svc.catalog.listActiveEvents();
     const windows = await svc.catalog.listAllWindows();
     const list = events
-      .filter((e) => isTodayOrFuture(e.event_date, now))
+      .filter((e) => isTodayOrFuture(e.last_session_date ?? e.event_date, now))
       .map((e) => {
         const ws = windows.filter((w) => w.event_id === e.id);
         const current = pickWindowForTime(ws, now);
         return {
           ...eventToApi(e, now),
-          is_today: isSameDay(e.event_date, now),
+          is_today: ws.some((w) => w.session_date && isSameDay(new Date(`${w.session_date}T00:00:00`), now)),
           session_windows: ws.map(windowToApi),
           current_session_window_id: current?.id ?? null,
         };

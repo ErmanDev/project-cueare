@@ -66,7 +66,7 @@ function parseRows(filePath: string): SampleRow[] {
       lastName: mapped.row.lastName,
       programCode: mapped.row.programCode ?? 'GEN',
       yearLevel: mapped.row.yearLevel ?? 1,
-      sectionCode: mapped.row.section ?? '',
+      sectionCode: mapped.row.section || `${mapped.row.programCode ?? 'GEN'}-${mapped.row.yearLevel ?? 1}A`,
     };
   });
 }

@@ -236,6 +236,16 @@ adminRouter.delete(
   }),
 );
 
+// --- academics ---
+
+adminRouter.get(
+  '/academics/hierarchy',
+  asyncHandler(async (req, res) => {
+    const data = await q.getAcademicHierarchy(getPool());
+    res.json(data);
+  }),
+);
+
 // --- sections ---
 
 adminRouter.get(
@@ -294,9 +304,10 @@ adminRouter.post(
     const id = parsePathId(req.params.id);
     const existing = await q.getEventById(getPool(), id);
     if (!existing) throw notFound('Event not found');
-    await q.ensureEventRoster(getPool(), id, req.auth!.id);
-    // Auto-generate QR tokens for all synced participants
-    await q.upsertEventParticipantTokens(getPool(), id, req.auth!.id);
+    await withTransaction(getPool(), async (client) => {
+      await q.ensureEventRoster(client, id, req.auth!.id);
+      await q.upsertEventParticipantTokens(client, id, req.auth!.id);
+    });
     const count = await q.countEventParticipants(getPool(), id);
     res.json({
       event_id: id,
@@ -330,16 +341,13 @@ adminRouter.post(
     const studentIds = Array.isArray(body.student_ids) ? body.student_ids.map(Number).filter(Boolean) : [];
     const sectionId = optionalInt(body, 'section_id');
 
-    let addedCount = 0;
-    if (sectionId) {
-      addedCount += await q.addSectionToEvent(getPool(), id, sectionId, req.auth!.id);
-    }
-    if (studentIds.length > 0) {
-      addedCount += await q.addParticipantsToEvent(getPool(), id, studentIds, req.auth!.id);
-    }
-
-    // Auto-generate QR tokens for all (new) participants — idempotent, existing tokens untouched
-    await q.upsertEventParticipantTokens(getPool(), id, req.auth!.id);
+    const addedCount = await withTransaction(getPool(), async (client) => {
+      let added = 0;
+      if (sectionId) added += await q.addSectionToEvent(client, id, sectionId, req.auth!.id);
+      if (studentIds.length > 0) added += await q.addParticipantsToEvent(client, id, studentIds, req.auth!.id);
+      await q.upsertEventParticipantTokens(client, id, req.auth!.id);
+      return added;
+    });
 
     const total = await q.countEventParticipants(getPool(), id);
     res.json({
@@ -355,7 +363,7 @@ adminRouter.delete(
   asyncHandler(async (req, res) => {
     const id = parsePathId(req.params.id);
     const studentId = parsePathId(req.params.studentId);
-    await q.removeEventParticipant(getPool(), id, studentId);
+    await withTransaction(getPool(), (client) => q.removeEventParticipant(client, id, studentId));
     res.status(204).end();
   }),
 );
@@ -369,7 +377,7 @@ adminRouter.post(
     const id = parsePathId(req.params.id);
     const existing = await q.getEventById(getPool(), id);
     if (!existing) throw notFound('Event not found');
-    const created = await q.upsertEventParticipantTokens(getPool(), id, req.auth!.id);
+    const created = await withTransaction(getPool(), (client) => q.upsertEventParticipantTokens(client, id, req.auth!.id));
     const tokens = await q.listEventParticipantTokens(getPool(), id);
     res.json({ event_id: id, created, tokens });
   }),
@@ -392,7 +400,7 @@ adminRouter.post(
   '/events/:id/tokens/:tokenId/revoke',
   asyncHandler(async (req, res) => {
     const tokenId = parsePathId(req.params.tokenId);
-    const ok = await q.revokeEventParticipantToken(getPool(), tokenId, req.auth!.id);
+    const ok = await withTransaction(getPool(), (client) => q.revokeEventParticipantToken(client, tokenId, req.auth!.id));
     if (!ok) throw notFound('Token not found or already revoked');
     res.json({ token_id: tokenId, is_revoked: true });
   }),
@@ -403,7 +411,7 @@ adminRouter.post(
   '/events/:id/tokens/:tokenId/reissue',
   asyncHandler(async (req, res) => {
     const tokenId = parsePathId(req.params.tokenId);
-    const newToken = await q.reissueEventParticipantToken(getPool(), tokenId, req.auth!.id);
+    const newToken = await withTransaction(getPool(), (client) => q.reissueEventParticipantToken(client, tokenId, req.auth!.id));
     if (!newToken) throw notFound('Token not found');
     res.json({ token_id: tokenId, token: newToken, is_revoked: false });
   }),
@@ -437,6 +445,7 @@ adminRouter.post(
           if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
           const w = raw as Record<string, unknown>;
           const label = requireString(w, 'session_label');
+          const sessionDate = hasKey(w, 'session_date') && w.session_date ? parseDate(w, 'session_date') : date;
           const start = normaliseTime(requireString(w, 'start_time'));
           const end = normaliseTime(requireString(w, 'end_time'));
           const lateAfter = optionalString(w, 'late_after');
@@ -445,12 +454,14 @@ adminRouter.post(
           const outEnd = optionalString(w, 'out_end');
           await svc.validateWindow({
             eventId: event.id,
+            sessionDate,
             startTime: start,
             endTime: end,
             db: client,
           });
           await q.insertWindow(client, {
             eventId: event.id,
+            sessionDate,
             sessionLabel: label,
             startTime: start,
             endTime: end,
@@ -471,6 +482,7 @@ adminRouter.post(
       const windows = await q.windowsForEvent(client, event.id);
       const refreshed = (await q.getEventById(client, event.id))!;
       return {
+        id: event.id,
         ...eventToApi(refreshed, svc.now()),
         session_windows: windows.map(windowToApi),
       };
@@ -499,6 +511,8 @@ adminRouter.post(
     if (!event) throw notFound('Event not found');
     const body = jsonObject(req);
     const label = requireString(body, 'session_label');
+    const sessionDate = hasKey(body, 'session_date') && body.session_date
+      ? parseDate(body, 'session_date') : event.event_date;
     const startRaw = requireString(body, 'start_time');
     const endRaw = requireString(body, 'end_time');
     if (!isValidTime(startRaw) || !isValidTime(endRaw)) {
@@ -507,7 +521,7 @@ adminRouter.post(
     const start = normaliseTime(startRaw);
     const end = normaliseTime(endRaw);
     const svc = service(req);
-    await svc.validateWindow({ eventId, startTime: start, endTime: end });
+    await svc.validateWindow({ eventId, sessionDate, startTime: start, endTime: end });
     let sortOrder = optionalInt(body, 'sort_order');
     if (sortOrder == null) {
       const existing = await svc.windowsForEvent(eventId);
@@ -517,16 +531,21 @@ adminRouter.post(
     const inEnd = optionalString(body, 'in_end');
     const outStart = optionalString(body, 'out_start');
     const outEnd = optionalString(body, 'out_end');
-    const created = await q.insertWindow(getPool(), {
-      eventId,
-      sessionLabel: label,
-      startTime: start,
-      endTime: end,
-      lateAfter: lateAfter ? normaliseTime(lateAfter) : null,
-      inEnd: inEnd ? normaliseTime(inEnd) : null,
-      outStart: outStart ? normaliseTime(outStart) : null,
-      outEnd: outEnd ? normaliseTime(outEnd) : null,
-      sortOrder,
+    const created = await withTransaction(getPool(), async (client) => {
+      const window = await q.insertWindow(client, {
+        eventId,
+        sessionDate,
+        sessionLabel: label,
+        startTime: start,
+        endTime: end,
+        lateAfter: lateAfter ? normaliseTime(lateAfter) : null,
+        inEnd: inEnd ? normaliseTime(inEnd) : null,
+        outStart: outStart ? normaliseTime(outStart) : null,
+        outEnd: outEnd ? normaliseTime(outEnd) : null,
+        sortOrder,
+      });
+      await q.syncRegisteredEventSessions(client, eventId, req.auth!.id);
+      return window;
     });
     svc.invalidateEvent(eventId);
     res.status(201).json(windowToApi(created));
@@ -545,6 +564,7 @@ adminRouter.get(
     res.json(
       await withFinePolicy(
         {
+          id,
           ...eventToApi(existing, svc.now()),
           session_windows: windows.map(windowToApi),
         },
@@ -558,14 +578,18 @@ async function syncSessionWindowsForEvent(
   db: Queryable,
   eventId: number,
   rawWindows: unknown[],
-  svc: AdminService,
+  svc: AttendanceService,
 ): Promise<void> {
   const existing = await q.windowsForEvent(db, eventId);
+  const event = await q.getEventById(db, eventId);
+  if (!event) throw notFound('Event not found');
   const existingMap = new Map(existing.map((w) => [w.id, w]));
 
   const drafts: Array<{
     id?: number;
     label: string;
+    sessionDate: Date;
+    sessionDateKey: string;
     start: string;
     end: string;
     startMins: number;
@@ -581,6 +605,9 @@ async function syncSessionWindowsForEvent(
   for (const raw of rawWindows) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
     const w = raw as Record<string, unknown>;
+    const sessionDate = hasKey(w, 'session_date') && w.session_date
+      ? parseDate(w, 'session_date') : event.event_date;
+    const sessionDateKey = `${sessionDate.getFullYear()}-${String(sessionDate.getMonth() + 1).padStart(2, '0')}-${String(sessionDate.getDate()).padStart(2, '0')}`;
     const windowId = optionalInt(w, 'id') ?? optionalInt(w, 'event_session_id');
     const label = requireString(w, 'session_label');
     const start = normaliseTime(requireString(w, 'start_time'));
@@ -593,6 +620,8 @@ async function syncSessionWindowsForEvent(
     drafts.push({
       id: windowId && existingMap.has(windowId) ? windowId : undefined,
       label,
+      sessionDate,
+      sessionDateKey,
       start,
       end,
       startMins,
@@ -609,7 +638,7 @@ async function syncSessionWindowsForEvent(
     for (let j = i + 1; j < drafts.length; j++) {
       const a = drafts[i]!;
       const b = drafts[j]!;
-      if (overlaps(a.startMins, a.endMins, b.startMins, b.endMins)) {
+      if (a.sessionDateKey === b.sessionDateKey && overlaps(a.startMins, a.endMins, b.startMins, b.endMins)) {
         throw conflict(`"${a.label}" (${a.start}–${a.end}) overlaps "${b.label}" (${b.start}–${b.end})`, {
           code: 'WINDOW_OVERLAP',
         });
@@ -622,6 +651,7 @@ async function syncSessionWindowsForEvent(
     if (d.id) {
       await q.updateWindow(db, d.id, {
         sessionLabel: d.label,
+        sessionDate: d.sessionDate,
         startTime: d.start,
         endTime: d.end,
         lateAfter: d.lateAfter !== undefined ? (d.lateAfter ? normaliseTime(d.lateAfter) : null) : undefined,
@@ -634,6 +664,7 @@ async function syncSessionWindowsForEvent(
     } else {
       const created = await q.insertWindow(db, {
         eventId,
+        sessionDate: d.sessionDate,
         sessionLabel: d.label,
         startTime: d.start,
         endTime: d.end,
@@ -671,10 +702,13 @@ adminRouter.put(
     const svc = service(req);
     const name = optionalString(body, 'name');
     const date = hasKey(body, 'event_date') ? parseDate(body, 'event_date') : null;
-    if (date) svc.requireEventDateNotPast(date);
+    if (date && date.getTime() !== existing.event_date.getTime()) svc.requireEventDateNotPast(date);
     const isActive = optionalBool(body, 'is_active');
     if (isActive) {
-      svc.requireEventDateNotPast(date ?? existing.event_date);
+      svc.requireEventDateNotPast(
+        date && date.getTime() !== existing.event_date.getTime()
+          ? date : existing.last_session_date ?? existing.event_date,
+      );
     }
     const fineTemplateId = hasKey(body, 'fine_template_id') ? optionalInt(body, 'fine_template_id') : null;
     const updated = await withTransaction(getPool(), async (client) => {
@@ -685,6 +719,7 @@ adminRouter.put(
       });
       if (hasKey(body, 'session_windows') && Array.isArray(body.session_windows)) {
         await syncSessionWindowsForEvent(client, id, body.session_windows as unknown[], svc);
+        await q.syncRegisteredEventSessions(client, id, req.auth!.id);
       }
       if (fineTemplateId) {
         await applyEventFineTemplate(client, id, fineTemplateId, req.auth!.id, event.name);
@@ -696,6 +731,7 @@ adminRouter.put(
     res.json(
       await withFinePolicy(
         {
+          id,
           ...eventToApi(updated, svc.now()),
           session_windows: windows.map(windowToApi),
         },
@@ -1382,6 +1418,220 @@ adminRouter.post(
         paymentMethodCode,
         totalAmount,
         externalPaymentReference,
+        rules: parsedRules,
+      });
+    });
+
+    const updated = await q.getEventFinePolicy(getPool(), eventId);
+    res.json(updated);
+  }),
+);
+
+adminRouter.post(
+  '/events/:id/session-windows/:windowId/close',
+  asyncHandler(async (req, res) => {
+    const eventId = parsePathId(req.params.id);
+    const windowId = parsePathId(req.params.windowId);
+    const window = await q.getWindowById(getPool(), windowId);
+    if (!window || window.event_id !== eventId) throw notFound('Session window not found for this event');
+    const result = await withTransaction(getPool(), (client) =>
+      q.closeSessionAndAssessFines(client, windowId, req.auth!.id),
+    );
+    service(req).invalidateEvent(eventId);
+    res.json({ event_id: eventId, session_window_id: windowId, is_closed: true, ...result });
+  }),
+);
+
+// --- Composite Event Upsert & Publish ---
+
+adminRouter.post(
+  '/events/composite',
+  asyncHandler(async (req, res) => {
+    const body = jsonObject(req);
+    const eventCode = requireString(body, 'event_code');
+    const eventName = requireString(body, 'event_name');
+    const academicTermId = optionalInt(body, 'academic_term_id') ?? undefined;
+    const eventDate = optionalString(body, 'event_date') ?? undefined;
+    const sessions = Array.isArray(body.sessions) ? (body.sessions as any[]) : undefined;
+    const audienceRules = Array.isArray(body.audience_rules) ? (body.audience_rules as any[]) : undefined;
+    const finePolicy = body.fine_policy && typeof body.fine_policy === 'object' ? (body.fine_policy as any) : undefined;
+
+    let createdId = 0;
+    await withTransaction(getPool(), async (client) => {
+      createdId = await q.upsertCompositeEvent(client, {
+        eventCode,
+        eventName,
+        academicTermId,
+        eventDate,
+        actorUserId: req.auth!.id,
+        sessions,
+        audienceRules,
+        finePolicy,
+      });
+    });
+
+    const eventWithPolicy = await q.getEventFinePolicy(getPool(), createdId);
+    res.status(201).json({ event_id: createdId, ...eventWithPolicy });
+  }),
+);
+
+adminRouter.put(
+  '/events/:id/composite',
+  asyncHandler(async (req, res) => {
+    const eventId = parsePathId(req.params.id);
+    const body = jsonObject(req);
+    const eventCode = requireString(body, 'event_code');
+    const eventName = requireString(body, 'event_name');
+    const academicTermId = optionalInt(body, 'academic_term_id') ?? undefined;
+    const eventDate = optionalString(body, 'event_date') ?? undefined;
+    const sessions = Array.isArray(body.sessions) ? (body.sessions as any[]) : undefined;
+    const audienceRules = Array.isArray(body.audience_rules) ? (body.audience_rules as any[]) : undefined;
+    const finePolicy = body.fine_policy && typeof body.fine_policy === 'object' ? (body.fine_policy as any) : undefined;
+
+    await withTransaction(getPool(), async (client) => {
+      await q.upsertCompositeEvent(client, {
+        eventId,
+        eventCode,
+        eventName,
+        academicTermId,
+        eventDate,
+        actorUserId: req.auth!.id,
+        sessions,
+        audienceRules,
+        finePolicy,
+      });
+    });
+
+    const eventWithPolicy = await q.getEventFinePolicy(getPool(), eventId);
+    res.json({ event_id: eventId, ...eventWithPolicy });
+  }),
+);
+
+adminRouter.post(
+  '/events/:id/publish',
+  asyncHandler(async (req, res) => {
+    const eventId = parsePathId(req.params.id);
+    const result = await withTransaction(getPool(), async (client) => {
+      return q.publishEventRoster(client, eventId, req.auth!.id);
+    });
+    res.json({ event_id: eventId, status: 'PUBLISHED', ...result });
+  }),
+);
+
+adminRouter.post(
+  '/events/:id/sessions/:sessionId/assess-fines',
+  asyncHandler(async (req, res) => {
+    const eventId = parsePathId(req.params.id);
+    const sessionId = parsePathId(req.params.sessionId);
+    const window = await q.getWindowById(getPool(), sessionId);
+    if (!window || window.event_id !== eventId) throw notFound('Session window not found for this event');
+    const result = await withTransaction(getPool(), async (client) => {
+      return q.closeSessionAndAssessFines(client, sessionId, req.auth!.id);
+    });
+    service(req).invalidateEvent(eventId);
+    res.json({ session_id: sessionId, ...result });
+  }),
+);
+
+// --- Fine Template Upsert ---
+
+adminRouter.post(
+  '/fine-templates/upsert',
+  asyncHandler(async (req, res) => {
+    const body = jsonObject(req);
+    const templateCode = requireString(body, 'template_code');
+    const templateName = requireString(body, 'template_name');
+    const description = optionalString(body, 'description');
+    const versionNumber = optionalInt(body, 'version_number') ?? 1;
+    const currencyCode = optionalString(body, 'currency_code') ?? 'PHP';
+    const maximumFinePerStudent = optionalMoney(body, 'maximum_fine_per_student');
+    const publish = optionalBool(body, 'publish') ?? true;
+    const isActive = optionalBool(body, 'is_active');
+    const rawRules = Array.isArray(body.rules) ? (body.rules as any[]) : [];
+
+    const rules = rawRules.map((r) => ({
+      sessionTypeCode: String(r.session_type_code || 'GENERAL').trim().toUpperCase(),
+      violationCode: String(r.violation_code || '').trim().toUpperCase(),
+      fineAmount: Number(r.fine_amount ?? 0),
+      priorityOrder: r.priority_order != null ? Number(r.priority_order) : 100,
+    }));
+    if (rules.some((r) => !r.violationCode || !Number.isFinite(r.fineAmount) || r.fineAmount < 0)) {
+      throw badRequest('Each rule needs a violation_code and a fine_amount of 0 or more');
+    }
+
+    const result = await withTransaction(getPool(), async (client) => {
+      const saved = await q.upsertFineTemplateWithVersion(client, {
+        templateCode,
+        templateName,
+        description,
+        versionNumber,
+        currencyCode,
+        maximumFinePerStudent,
+        publish,
+        actorUserId: req.auth!.id,
+        rules,
+      });
+      if (isActive != null) {
+        await q.setFineTemplateActive(client, saved.templateId, isActive);
+      }
+      return saved;
+    });
+
+    const matched = await q.getFineTemplateById(getPool(), result.templateId);
+    res.status(201).json(matched ?? result);
+  }),
+);
+
+// --- Fine Balances, Payments & Waivers ---
+
+adminRouter.get(
+  '/fines/balances',
+  asyncHandler(async (req, res) => {
+    const studentId = queryInt(req, 'student_id') ?? undefined;
+    const studentNumber = queryString(req, 'student_number') ?? undefined;
+    const sessionId = queryInt(req, 'session_id') ?? undefined;
+    const violationCode = queryString(req, 'violation_code') ?? undefined;
+    const status = queryString(req, 'status') ?? undefined;
+
+    const balances = await q.listStudentFineBalances(getPool(), {
+      studentId,
+      studentNumber,
+      sessionId,
+      violationCode,
+      status,
+    });
+    res.json(balances);
+  }),
+);
+
+adminRouter.post(
+  '/fines/payments',
+  asyncHandler(async (req, res) => {
+    const body = jsonObject(req);
+    const paymentReference = requireString(body, 'payment_reference');
+    const paymentMethodCode = requireString(body, 'payment_method_code').toUpperCase();
+    const totalAmount = Number(body.total_amount);
+    const externalPaymentReference = optionalString(body, 'external_payment_reference');
+    const rawAllocations = body.allocations;
+
+    if (isNaN(totalAmount) || totalAmount <= 0) {
+      throw badRequest('total_amount must be a positive number');
+    }
+    if (!Array.isArray(rawAllocations) || rawAllocations.length === 0) {
+      throw badRequest('allocations must be a non-empty array');
+    }
+
+    const allocations = rawAllocations.map((a: any) => ({
+      assessment_id: Number(a.assessment_id),
+      amount: Number(a.amount),
+    }));
+
+    const paymentId = await withTransaction(getPool(), async (client) => {
+      return q.postFinePayment(client, {
+        paymentReference,
+        paymentMethodCode,
+        totalAmount,
+        externalPaymentReference,
         actorUserId: req.auth!.id,
         allocations,
       });
@@ -1454,4 +1704,231 @@ adminRouter.post(
   }),
 );
 
+adminRouter.get(
+  '/academics/hierarchy',
+  asyncHandler(async (req, res) => {
+    const data = await q.getAcademicHierarchy(getPool());
+    res.json(data);
+  }),
+);
 
+// --- Academic Years ---
+
+adminRouter.get(
+  '/academic-years',
+  asyncHandler(async (req, res) => {
+    const activeOnly = queryString(req, 'active_only') === '1';
+    const years = await q.listAcademicYears(getPool(), {
+      isActive: activeOnly ? true : undefined,
+    });
+    res.json(years);
+  }),
+);
+
+adminRouter.get(
+  '/academic-years/:id',
+  asyncHandler(async (req, res) => {
+    const id = parsePathId(req.params.id);
+    const year = await q.getAcademicYearById(getPool(), id);
+    if (!year) throw notFound('Academic year not found');
+    res.json(year);
+  }),
+);
+
+adminRouter.post(
+  '/academic-years',
+  asyncHandler(async (req, res) => {
+    const body = jsonObject(req);
+    const yearCode = requireString(body, 'year_code').trim();
+    const yearName = requireString(body, 'year_name').trim();
+    const startsOn = requireString(body, 'starts_on').trim();
+    const endsOn = requireString(body, 'ends_on').trim();
+    const isActive = optionalBool(body, 'is_active') ?? true;
+
+    const existing = await q.getAcademicYearByCode(getPool(), yearCode);
+    if (existing) {
+      throw conflict(`Academic year code "${yearCode}" already exists`);
+    }
+
+    const created = await q.insertAcademicYear(getPool(), {
+      yearCode,
+      yearName,
+      startsOn,
+      endsOn,
+      isActive,
+    });
+
+    res.status(201).json(created);
+  }),
+);
+
+adminRouter.put(
+  '/academic-years/:id',
+  asyncHandler(async (req, res) => {
+    const id = parsePathId(req.params.id);
+    const existing = await q.getAcademicYearById(getPool(), id);
+    if (!existing) throw notFound('Academic year not found');
+
+    const body = jsonObject(req);
+    const yearName = optionalString(body, 'year_name')?.trim();
+    const startsOn = optionalString(body, 'starts_on')?.trim();
+    const endsOn = optionalString(body, 'ends_on')?.trim();
+    const isActive = optionalBool(body, 'is_active');
+
+    const updated = await q.updateAcademicYear(getPool(), id, {
+      yearName,
+      startsOn,
+      endsOn,
+      isActive,
+    });
+
+    res.json(updated);
+  }),
+);
+
+// --- Academic Terms ---
+
+adminRouter.get(
+  '/academic-terms',
+  asyncHandler(async (req, res) => {
+    const academicYearId = queryInt(req, 'academic_year_id');
+    const activeOnly = queryString(req, 'active_only') === '1';
+    const terms = await q.listAcademicTerms(getPool(), {
+      academicYearId: academicYearId ?? undefined,
+      isActive: activeOnly ? true : undefined,
+    });
+    res.json(terms);
+  }),
+);
+
+adminRouter.get(
+  '/academic-terms/:id',
+  asyncHandler(async (req, res) => {
+    const id = parsePathId(req.params.id);
+    const term = await q.getAcademicTermById(getPool(), id);
+    if (!term) throw notFound('Academic term not found');
+    res.json(term);
+  }),
+);
+
+adminRouter.post(
+  '/academic-terms',
+  asyncHandler(async (req, res) => {
+    const body = jsonObject(req);
+    const academicYearId = requireInt(body, 'academic_year_id');
+    const termCode = requireString(body, 'term_code').trim();
+    const termName = requireString(body, 'term_name').trim();
+    const startsOn = requireString(body, 'starts_on').trim();
+    const endsOn = requireString(body, 'ends_on').trim();
+    const isActive = optionalBool(body, 'is_active') ?? true;
+
+    const year = await q.getAcademicYearById(getPool(), academicYearId);
+    if (!year) throw notFound(`Academic year ID ${academicYearId} not found`);
+
+    const existing = await q.getAcademicTermByCode(getPool(), academicYearId, termCode);
+    if (existing) {
+      throw conflict(`Academic term code "${termCode}" already exists for this year`);
+    }
+
+    const created = await q.insertAcademicTerm(getPool(), {
+      academicYearId,
+      termCode,
+      termName,
+      startsOn,
+      endsOn,
+      isActive,
+    });
+
+    res.status(201).json(created);
+  }),
+);
+
+adminRouter.put(
+  '/academic-terms/:id',
+  asyncHandler(async (req, res) => {
+    const id = parsePathId(req.params.id);
+    const existing = await q.getAcademicTermById(getPool(), id);
+    if (!existing) throw notFound('Academic term not found');
+
+    const body = jsonObject(req);
+    const termName = optionalString(body, 'term_name')?.trim();
+    const startsOn = optionalString(body, 'starts_on')?.trim();
+    const endsOn = optionalString(body, 'ends_on')?.trim();
+    const isActive = optionalBool(body, 'is_active');
+
+    const updated = await q.updateAcademicTerm(getPool(), id, {
+      termName,
+      startsOn,
+      endsOn,
+      isActive,
+    });
+
+    res.json(updated);
+  }),
+);
+
+// --- Academic Programs ---
+
+adminRouter.get(
+  '/academic-programs',
+  asyncHandler(async (req, res) => {
+    const activeOnly = queryString(req, 'active_only') === '1';
+    const programs = await q.listAcademicPrograms(getPool(), {
+      isActive: activeOnly ? true : undefined,
+    });
+    res.json(programs);
+  }),
+);
+
+adminRouter.get(
+  '/academic-programs/:id',
+  asyncHandler(async (req, res) => {
+    const id = parsePathId(req.params.id);
+    const program = await q.getAcademicProgramById(getPool(), id);
+    if (!program) throw notFound('Academic program not found');
+    res.json(program);
+  }),
+);
+
+adminRouter.post(
+  '/academic-programs',
+  asyncHandler(async (req, res) => {
+    const body = jsonObject(req);
+    const programCode = requireString(body, 'program_code').trim().toUpperCase();
+    const programName = requireString(body, 'program_name').trim();
+    const isActive = optionalBool(body, 'is_active') ?? true;
+
+    const existing = await q.getAcademicProgramByCode(getPool(), programCode);
+    if (existing) {
+      throw conflict(`Academic program code "${programCode}" already exists`);
+    }
+
+    const created = await q.insertAcademicProgram(getPool(), {
+      programCode,
+      programName,
+      isActive,
+    });
+
+    res.status(201).json(created);
+  }),
+);
+
+adminRouter.put(
+  '/academic-programs/:id',
+  asyncHandler(async (req, res) => {
+    const id = parsePathId(req.params.id);
+    const existing = await q.getAcademicProgramById(getPool(), id);
+    if (!existing) throw notFound('Academic program not found');
+
+    const body = jsonObject(req);
+    const programName = optionalString(body, 'program_name')?.trim();
+    const isActive = optionalBool(body, 'is_active');
+
+    const updated = await q.updateAcademicProgram(getPool(), id, {
+      programName,
+      isActive,
+    });
+
+    res.json(updated);
+  }),
+);

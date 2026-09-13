@@ -64,6 +64,7 @@ export type EventRow = {
   id: number;
   name: string;
   event_date: Date;
+  last_session_date?: Date;
   is_active: boolean;
   created_by: number;
   created_at: Date;
@@ -74,6 +75,7 @@ export type SessionWindowRow = {
   id: number;
   event_id: number;
   session_label: string;
+  session_date?: string;
   start_time: string;
   end_time: string;
   late_after?: string | null;
@@ -81,6 +83,7 @@ export type SessionWindowRow = {
   out_start?: string | null;
   out_end?: string | null;
   requires_checkout?: boolean;
+  is_closed?: boolean;
   sort_order: number;
 };
 

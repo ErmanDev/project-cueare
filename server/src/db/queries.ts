@@ -176,12 +176,16 @@ function toWindow(row: {
   check_out_opens_at_utc?: Date | null;
   check_out_closes_at_utc?: Date | null;
   requires_check_out?: boolean;
+  is_closed?: boolean;
   sort_order: number;
 }): SessionWindowRow {
+  const date = row.starts_at_utc;
+  const sessionDate = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
   return {
     id: row.event_session_id,
     event_id: row.event_id,
     session_label: row.session_name,
+    session_date: sessionDate,
     start_time: hhmm(row.starts_at_utc),
     end_time: hhmm(row.ends_at_utc),
     late_after: row.late_after_utc ? hhmm(row.late_after_utc) : null,
@@ -189,6 +193,7 @@ function toWindow(row: {
     out_start: row.check_out_opens_at_utc ? hhmm(row.check_out_opens_at_utc) : null,
     out_end: row.check_out_closes_at_utc ? hhmm(row.check_out_closes_at_utc) : null,
     requires_checkout: row.requires_check_out ?? false,
+    is_closed: row.is_closed ?? false,
     sort_order: row.sort_order,
   };
 }
@@ -197,6 +202,7 @@ function mapEvent(row: {
   id: number;
   name: string;
   event_date: Date | string;
+  last_session_date?: Date | string;
   is_active: boolean;
   created_by: number;
   created_at: Date;
@@ -206,6 +212,7 @@ function mapEvent(row: {
     id: row.id,
     name: row.name,
     event_date: eventDateFromRow(row.event_date),
+    last_session_date: row.last_session_date ? eventDateFromRow(row.last_session_date) : undefined,
     is_active: row.is_active,
     created_by: row.created_by,
     created_at: row.created_at,
@@ -259,6 +266,9 @@ const EVENT_SELECT = `
     e.${q('eventId')} AS id,
     e.${q('eventName')} AS name,
     e.${q('eventDate')}::timestamp AS event_date,
+    COALESCE((SELECT MAX(es.${q('startsAtUtc')}::date)
+      FROM ${q('EventSessions')} es WHERE es.${q('eventId')} = e.${q('eventId')}),
+      e.${q('eventDate')})::timestamp AS last_session_date,
     (e.${q('eventStatusCode')} = 'PUBLISHED') AS is_active,
     e.${q('createdByUserId')} AS created_by,
     e.${q('createdAtUtc')} AS created_at,
@@ -821,32 +831,75 @@ export async function ensureEventRoster(
   for (const student of students) {
     await getOrCreateEnrollment(db, student.student_id);
   }
-  await db.query(
+  await registerEventStudents(db, eventId, actorUserId);
+  await syncEventSessionParticipants(db, eventId, actorUserId);
+}
+
+async function registerEventStudents(
+  db: Queryable,
+  eventId: number,
+  actorUserId: number,
+  studentIds?: number[],
+  sectionId?: number,
+): Promise<number> {
+  const result = await db.query(
+    `INSERT INTO ${q('EventRegistrations')} (
+       ${q('eventId')}, ${q('studentEnrollmentId')}, ${q('studentId')}, ${q('registeredByUserId')})
+     SELECT $1, se.${q('studentEnrollmentId')}, se.${q('studentId')}, $2
+     FROM ${q('Events')} e
+     JOIN ${q('StudentEnrollments')} se ON se.${q('academicTermId')} = e.${q('academicTermId')}
+     JOIN ${q('Students')} s ON s.${q('studentId')} = se.${q('studentId')}
+     WHERE e.${q('eventId')} = $1
+       AND se.${q('effectiveToUtc')} IS NULL
+       AND se.${q('enrollmentStatusCode')} = 'ENROLLED'
+       AND s.${q('isActive')} = true
+       AND ($3::bigint[] IS NULL OR se.${q('studentId')} = ANY($3::bigint[]))
+       AND ($4::bigint IS NULL OR se.${q('sectionId')} = $4)
+     ON CONFLICT (${q('eventId')}, ${q('studentId')}) DO NOTHING`,
+    [eventId, actorUserId, studentIds ?? null, sectionId ?? null],
+  );
+  return result.rowCount ?? 0;
+}
+
+async function syncEventSessionParticipants(db: Queryable, eventId: number, actorUserId: number): Promise<number> {
+  const result = await db.query(
     `INSERT INTO ${q('EventParticipants')} (
-        ${q('eventSessionId')}, ${q('academicTermId')}, ${q('studentEnrollmentId')},
-        ${q('studentId')}, ${q('addedByUserId')}
-     )
-     SELECT es.${q('eventSessionId')}, COALESCE(es.${q('academicTermId')}, e.${q('academicTermId')}),
-            se.${q('studentEnrollmentId')}, se.${q('studentId')}, $2
-     FROM ${q('EventSessions')} es
-     JOIN ${q('Events')} e ON e.${q('eventId')} = es.${q('eventId')}
-     JOIN ${q('StudentEnrollments')} se
-       ON se.${q('academicTermId')} = e.${q('academicTermId')}
-      AND se.${q('effectiveToUtc')} IS NULL
-      AND se.${q('enrollmentStatusCode')} = 'ENROLLED'
-     WHERE es.${q('eventId')} = $1
-     ON CONFLICT (${q('eventSessionId')}, ${q('studentId')}) DO NOTHING`,
+       ${q('eventRegistrationId')}, ${q('eventSessionId')}, ${q('academicTermId')},
+       ${q('studentEnrollmentId')}, ${q('studentId')}, ${q('isRequired')}, ${q('addedByUserId')})
+     SELECT er.${q('eventRegistrationId')}, es.${q('eventSessionId')},
+       e.${q('academicTermId')}, er.${q('studentEnrollmentId')},
+       er.${q('studentId')}, er.${q('isRequired')}, $2
+     FROM ${q('EventRegistrations')} er
+     JOIN ${q('Events')} e ON e.${q('eventId')} = er.${q('eventId')}
+     JOIN ${q('EventSessions')} es ON es.${q('eventId')} = e.${q('eventId')}
+     WHERE er.${q('eventId')} = $1
+       AND er.${q('registrationStatusCode')} = 'ACTIVE'
+     ON CONFLICT (${q('eventSessionId')}, ${q('studentId')})
+     DO UPDATE SET ${q('eventRegistrationId')} = EXCLUDED.${q('eventRegistrationId')}
+     WHERE ${q('EventParticipants')}.${q('eventRegistrationId')} IS NULL`,
     [eventId, actorUserId],
   );
+  await db.query(
+    `INSERT INTO ${q('AttendanceRecords')} (${q('eventParticipantId')}, ${q('lastChangedByUserId')})
+     SELECT ep.${q('eventParticipantId')}, $2
+     FROM ${q('EventParticipants')} ep
+     JOIN ${q('EventSessions')} es ON es.${q('eventSessionId')} = ep.${q('eventSessionId')}
+     WHERE es.${q('eventId')} = $1 AND es.${q('isClosed')} = true
+     ON CONFLICT (${q('eventParticipantId')}) DO NOTHING`,
+    [eventId, actorUserId],
+  );
+  return result.rowCount ?? 0;
+}
+
+export async function syncRegisteredEventSessions(db: Queryable, eventId: number, actorUserId: number): Promise<number> {
+  return syncEventSessionParticipants(db, eventId, actorUserId);
 }
 
 export async function countEventParticipants(db: Queryable, eventId: number): Promise<number> {
   const row = await one<{ count: string }>(
     db,
-    `SELECT COUNT(DISTINCT ep.${q('studentId')})::text AS count
-     FROM ${q('EventParticipants')} ep
-     JOIN ${q('EventSessions')} es ON es.${q('eventSessionId')} = ep.${q('eventSessionId')}
-     WHERE es.${q('eventId')} = $1`,
+    `SELECT COUNT(*)::text AS count FROM ${q('EventRegistrations')}
+     WHERE ${q('eventId')} = $1 AND ${q('registrationStatusCode')} = 'ACTIVE'`,
     [eventId],
   );
   return Number(row?.count ?? 0);
@@ -860,11 +913,11 @@ export async function listEventParticipantCounts(
   if (eventIds.length === 0) return map;
   const rows = await many<{ event_id: number; count: string }>(
     db,
-    `SELECT es.${q('eventId')} AS event_id, COUNT(DISTINCT ep.${q('studentId')})::text AS count
-     FROM ${q('EventParticipants')} ep
-     JOIN ${q('EventSessions')} es ON es.${q('eventSessionId')} = ep.${q('eventSessionId')}
-     WHERE es.${q('eventId')} = ANY($1::bigint[])
-     GROUP BY es.${q('eventId')}`,
+    `SELECT er.${q('eventId')} AS event_id, COUNT(*)::text AS count
+     FROM ${q('EventRegistrations')} er
+     WHERE er.${q('eventId')} = ANY($1::bigint[])
+       AND er.${q('registrationStatusCode')} = 'ACTIVE'
+     GROUP BY er.${q('eventId')}`,
     [eventIds],
   );
   for (const r of rows) {
@@ -883,6 +936,14 @@ export type EventParticipantRow = {
   year_level: number | null;
   section: string | null;
   added_at: string;
+  sessions?: Array<{
+    session_id: number;
+    session_name: string;
+    session_date: string;
+    status: string;
+    checked_in_at_utc: Date | null;
+    checked_out_at_utc: Date | null;
+  }>;
 };
 
 export async function listEventParticipants(
@@ -894,7 +955,7 @@ export async function listEventParticipants(
   const limit = Math.min(500, Math.max(1, options.limit ?? 50));
   const offset = (page - 1) * limit;
 
-  const conditions: string[] = [`es.${q('eventId')} = $1`];
+  const conditions: string[] = [`er.${q('eventId')} = $1`, `er.${q('registrationStatusCode')} = 'ACTIVE'`];
   const params: unknown[] = [eventId];
 
   if (options.q && options.q.trim()) {
@@ -913,11 +974,10 @@ export async function listEventParticipants(
 
   const countRow = await one<{ count: string }>(
     db,
-    `SELECT COUNT(DISTINCT ep.${q('studentId')})::text AS count
-     FROM ${q('EventParticipants')} ep
-     JOIN ${q('EventSessions')} es ON es.${q('eventSessionId')} = ep.${q('eventSessionId')}
-     JOIN ${q('Students')} s ON s.${q('studentId')} = ep.${q('studentId')}
-     LEFT JOIN ${q('StudentEnrollments')} se ON se.${q('studentEnrollmentId')} = ep.${q('studentEnrollmentId')}
+    `SELECT COUNT(*)::text AS count
+     FROM ${q('EventRegistrations')} er
+     JOIN ${q('Students')} s ON s.${q('studentId')} = er.${q('studentId')}
+     LEFT JOIN ${q('StudentEnrollments')} se ON se.${q('studentEnrollmentId')} = er.${q('studentEnrollmentId')}
      LEFT JOIN ${q('Sections')} sec ON sec.${q('sectionId')} = se.${q('sectionId')}
      WHERE ${whereClause}`,
     params,
@@ -940,18 +1000,54 @@ export async function listEventParticipants(
         p.${q('programCode')} AS course,
         se.${q('yearLevel')} AS year_level,
         sec.${q('sectionName')} AS section,
-        ep.${q('addedAtUtc')} AS added_at
-     FROM ${q('EventParticipants')} ep
-     JOIN ${q('EventSessions')} es ON es.${q('eventSessionId')} = ep.${q('eventSessionId')}
-     JOIN ${q('Students')} s ON s.${q('studentId')} = ep.${q('studentId')}
-     LEFT JOIN ${q('StudentEnrollments')} se ON se.${q('studentEnrollmentId')} = ep.${q('studentEnrollmentId')}
+        er.${q('registeredAtUtc')} AS added_at
+     FROM ${q('EventRegistrations')} er
+     JOIN ${q('Students')} s ON s.${q('studentId')} = er.${q('studentId')}
+     LEFT JOIN ${q('StudentEnrollments')} se ON se.${q('studentEnrollmentId')} = er.${q('studentEnrollmentId')}
      LEFT JOIN ${q('AcademicPrograms')} p ON p.${q('academicProgramId')} = se.${q('academicProgramId')}
      LEFT JOIN ${q('Sections')} sec ON sec.${q('sectionId')} = se.${q('sectionId')}
      WHERE ${whereClause}
-     ORDER BY s.${q('studentId')}, ep.${q('addedAtUtc')} ASC
+     ORDER BY s.${q('studentId')}, er.${q('registeredAtUtc')} ASC
      LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
     params,
   );
+
+  if (rows.length > 0) {
+    const sessionRows = await many<{
+      student_id: number;
+      session_id: number;
+      session_name: string;
+      session_date: string;
+      status: string;
+      checked_in_at_utc: Date | null;
+      checked_out_at_utc: Date | null;
+    }>(
+      db,
+      `SELECT er.${q('studentId')} AS student_id,
+         es.${q('eventSessionId')} AS session_id,
+         es.${q('sessionName')} AS session_name,
+         es.${q('startsAtUtc')}::date::text AS session_date,
+         COALESCE(st.${q('attendanceStatusCode')}, 'PENDING') AS status,
+         st.${q('checkedInAtUtc')} AS checked_in_at_utc,
+         st.${q('checkedOutAtUtc')} AS checked_out_at_utc
+       FROM ${q('EventRegistrations')} er
+       JOIN ${q('EventSessions')} es ON es.${q('eventId')} = er.${q('eventId')}
+       LEFT JOIN ${q('AttendanceSessionStatus')} st
+         ON st.${q('eventSessionId')} = es.${q('eventSessionId')}
+         AND st.${q('studentId')} = er.${q('studentId')}
+       WHERE er.${q('eventId')} = $1
+         AND er.${q('studentId')} = ANY($2::bigint[])
+       ORDER BY es.${q('startsAtUtc')}, es.${q('sortOrder')}`,
+      [eventId, rows.map((row) => row.student_id)],
+    );
+    const byStudent = new Map<number, EventParticipantRow['sessions']>();
+    for (const session of sessionRows) {
+      const current = byStudent.get(session.student_id) ?? [];
+      current.push(session);
+      byStudent.set(session.student_id, current);
+    }
+    for (const row of rows) row.sessions = byStudent.get(row.student_id) ?? [];
+  }
 
   return { rows, total };
 }
@@ -968,26 +1064,9 @@ export async function addParticipantsToEvent(
     await getOrCreateEnrollment(db, sid);
   }
 
-  const result = await db.query(
-    `INSERT INTO ${q('EventParticipants')} (
-        ${q('eventSessionId')}, ${q('academicTermId')}, ${q('studentEnrollmentId')},
-        ${q('studentId')}, ${q('addedByUserId')}
-     )
-     SELECT es.${q('eventSessionId')}, COALESCE(es.${q('academicTermId')}, e.${q('academicTermId')}),
-            se.${q('studentEnrollmentId')}, se.${q('studentId')}, $3
-     FROM ${q('EventSessions')} es
-     JOIN ${q('Events')} e ON e.${q('eventId')} = es.${q('eventId')}
-     JOIN ${q('StudentEnrollments')} se
-       ON se.${q('academicTermId')} = e.${q('academicTermId')}
-      AND se.${q('effectiveToUtc')} IS NULL
-      AND se.${q('enrollmentStatusCode')} = 'ENROLLED'
-     WHERE es.${q('eventId')} = $1
-       AND se.${q('studentId')} = ANY($2::bigint[])
-     ON CONFLICT (${q('eventSessionId')}, ${q('studentId')}) DO NOTHING`,
-    [eventId, studentIds, actorUserId],
-  );
-
-  return result.rowCount ?? 0;
+  const added = await registerEventStudents(db, eventId, actorUserId, studentIds);
+  await syncEventSessionParticipants(db, eventId, actorUserId);
+  return added;
 }
 
 export async function addSectionToEvent(
@@ -996,26 +1075,9 @@ export async function addSectionToEvent(
   sectionId: number,
   actorUserId: number,
 ): Promise<number> {
-  const result = await db.query(
-    `INSERT INTO ${q('EventParticipants')} (
-        ${q('eventSessionId')}, ${q('academicTermId')}, ${q('studentEnrollmentId')},
-        ${q('studentId')}, ${q('addedByUserId')}
-     )
-     SELECT es.${q('eventSessionId')}, COALESCE(es.${q('academicTermId')}, e.${q('academicTermId')}),
-            se.${q('studentEnrollmentId')}, se.${q('studentId')}, $3
-     FROM ${q('EventSessions')} es
-     JOIN ${q('Events')} e ON e.${q('eventId')} = es.${q('eventId')}
-     JOIN ${q('StudentEnrollments')} se
-       ON se.${q('academicTermId')} = e.${q('academicTermId')}
-      AND se.${q('effectiveToUtc')} IS NULL
-      AND se.${q('enrollmentStatusCode')} = 'ENROLLED'
-     WHERE es.${q('eventId')} = $1
-       AND se.${q('sectionId')} = $2
-     ON CONFLICT (${q('eventSessionId')}, ${q('studentId')}) DO NOTHING`,
-    [eventId, sectionId, actorUserId],
-  );
-
-  return result.rowCount ?? 0;
+  const added = await registerEventStudents(db, eventId, actorUserId, undefined, sectionId);
+  await syncEventSessionParticipants(db, eventId, actorUserId);
+  return added;
 }
 
 export async function removeEventParticipant(
@@ -1024,6 +1086,19 @@ export async function removeEventParticipant(
   studentId: number,
 ): Promise<void> {
   await db.query(
+    `DELETE FROM ${q('EventParticipantQrCredentials')} c
+     USING ${q('EventRegistrations')} er
+     WHERE c.${q('eventRegistrationId')} = er.${q('eventRegistrationId')}
+       AND er.${q('eventId')} = $1 AND er.${q('studentId')} = $2`,
+    [eventId, studentId],
+  );
+  await ignoreMissingRelation(
+    db,
+    `DELETE FROM ${q('EventParticipantTokens')}
+     WHERE ${q('eventId')} = $1 AND ${q('studentId')} = $2`,
+    [eventId, studentId],
+  );
+  await db.query(
     `DELETE FROM ${q('EventParticipants')} ep
      USING ${q('EventSessions')} es
      WHERE es.${q('eventSessionId')} = ep.${q('eventSessionId')}
@@ -1031,10 +1106,15 @@ export async function removeEventParticipant(
        AND ep.${q('studentId')} = $2`,
     [eventId, studentId],
   );
+  await db.query(
+    `DELETE FROM ${q('EventRegistrations')}
+     WHERE ${q('eventId')} = $1 AND ${q('studentId')} = $2`,
+    [eventId, studentId],
+  );
 }
 
 // ---------------------------------------------------------------------------
-// EventParticipantTokens — per-event UUID QR token management
+// Event QR credentials - one active UUID QR credential per event registration.
 // ---------------------------------------------------------------------------
 
 export type EventParticipantTokenRow = {
@@ -1058,24 +1138,67 @@ export type EventParticipantTokenRow = {
 };
 
 /**
- * Upsert tokens for every participant in the event (INSERT ... ON CONFLICT DO NOTHING).
- * Returns the count of newly created tokens.
+ * Upsert QR credentials for every active registration in the event.
+ * Returns the count of newly created credentials.
  */
 export async function upsertEventParticipantTokens(
   db: Queryable,
   eventId: number,
   issuedByUserId: number,
 ): Promise<number> {
-  const res = await db.query(
+  await ignoreMissingRelation(
+    db,
     `INSERT INTO ${q('EventParticipantTokens')} (${q('eventId')}, ${q('studentId')}, ${q('issuedByUserId')})
-     SELECT DISTINCT es.${q('eventId')}, ep.${q('studentId')}, $2::int
-     FROM ${q('EventParticipants')} ep
-     JOIN ${q('EventSessions')} es ON es.${q('eventSessionId')} = ep.${q('eventSessionId')}
-     WHERE es.${q('eventId')} = $1
+     SELECT er.${q('eventId')}, er.${q('studentId')}, $2::int
+     FROM ${q('EventRegistrations')} er
+     WHERE er.${q('eventId')} = $1 AND er.${q('registrationStatusCode')} = 'ACTIVE'
      ON CONFLICT (${q('eventId')}, ${q('studentId')}) DO NOTHING`,
     [eventId, issuedByUserId],
   );
+  await copyLegacyTokensToQrCredentials(db, eventId);
+  const res = await db.query(
+    `WITH pending AS (
+       SELECT er.${q('eventRegistrationId')}, gen_random_uuid() AS token
+       FROM ${q('EventRegistrations')} er
+       WHERE er.${q('eventId')} = $1
+         AND er.${q('registrationStatusCode')} = 'ACTIVE'
+         AND NOT EXISTS (
+           SELECT 1 FROM ${q('EventParticipantQrCredentials')} c
+           WHERE c.${q('eventRegistrationId')} = er.${q('eventRegistrationId')}
+             AND c.${q('revokedAtUtc')} IS NULL
+         )
+     )
+     INSERT INTO ${q('EventParticipantQrCredentials')} (
+       ${q('eventRegistrationId')}, token, ${q('tokenHash')}, ${q('issuedByUserId')})
+     SELECT ${q('eventRegistrationId')}, token, decode(md5(token::text), 'hex'), $2::int
+     FROM pending
+     ON CONFLICT DO NOTHING`,
+    [eventId, issuedByUserId],
+  );
   return res.rowCount ?? 0;
+}
+
+async function copyLegacyTokensToQrCredentials(db: Queryable, eventId: number): Promise<void> {
+  await ignoreMissingRelation(
+    db,
+    `INSERT INTO ${q('EventParticipantQrCredentials')} (
+       ${q('eventRegistrationId')}, token, ${q('tokenHash')}, ${q('issuedByUserId')}, ${q('issuedAtUtc')})
+     SELECT er.${q('eventRegistrationId')}, t.token, decode(md5(t.token::text), 'hex'),
+       t.${q('issuedByUserId')}, t.${q('issuedAtUtc')}
+     FROM ${q('EventParticipantTokens')} t
+     JOIN ${q('EventRegistrations')} er ON er.${q('eventId')} = t.${q('eventId')}
+       AND er.${q('studentId')} = t.${q('studentId')}
+     WHERE t.${q('eventId')} = $1
+       AND t.${q('isRevoked')} = false
+       AND er.${q('registrationStatusCode')} = 'ACTIVE'
+       AND NOT EXISTS (
+         SELECT 1 FROM ${q('EventParticipantQrCredentials')} c
+         WHERE c.${q('eventRegistrationId')} = er.${q('eventRegistrationId')}
+           AND c.${q('revokedAtUtc')} IS NULL
+       )
+     ON CONFLICT DO NOTHING`,
+    [eventId],
+  );
 }
 
 /**
@@ -1088,10 +1211,35 @@ export async function upsertTokenForStudent(
   studentId: number,
   issuedByUserId: number,
 ): Promise<void> {
-  await db.query(
+  await ignoreMissingRelation(
+    db,
     `INSERT INTO ${q('EventParticipantTokens')} (${q('eventId')}, ${q('studentId')}, ${q('issuedByUserId')})
-     VALUES ($1, $2, $3::int)
+     SELECT ${q('eventId')}, ${q('studentId')}, $3::int
+     FROM ${q('EventRegistrations')}
+     WHERE ${q('eventId')} = $1 AND ${q('studentId')} = $2
+       AND ${q('registrationStatusCode')} = 'ACTIVE'
      ON CONFLICT (${q('eventId')}, ${q('studentId')}) DO NOTHING`,
+    [eventId, studentId, issuedByUserId],
+  );
+  await copyLegacyTokensToQrCredentials(db, eventId);
+  await db.query(
+    `WITH pending AS (
+       SELECT ${q('eventRegistrationId')}, gen_random_uuid() AS token
+       FROM ${q('EventRegistrations')} er
+       WHERE er.${q('eventId')} = $1
+         AND er.${q('studentId')} = $2
+         AND er.${q('registrationStatusCode')} = 'ACTIVE'
+         AND NOT EXISTS (
+           SELECT 1 FROM ${q('EventParticipantQrCredentials')} c
+           WHERE c.${q('eventRegistrationId')} = er.${q('eventRegistrationId')}
+             AND c.${q('revokedAtUtc')} IS NULL
+         )
+     )
+     INSERT INTO ${q('EventParticipantQrCredentials')} (
+       ${q('eventRegistrationId')}, token, ${q('tokenHash')}, ${q('issuedByUserId')})
+     SELECT ${q('eventRegistrationId')}, token, decode(md5(token::text), 'hex'), $3::int
+     FROM pending
+     ON CONFLICT DO NOTHING`,
     [eventId, studentId, issuedByUserId],
   );
 }
@@ -1105,16 +1253,16 @@ export async function listEventParticipantTokens(
 ): Promise<EventParticipantTokenRow[]> {
   return many<EventParticipantTokenRow>(
     db,
-    `SELECT
-       t.${q('tokenId')} AS token_id,
-       t.${q('eventId')} AS event_id,
-       t.${q('studentId')} AS student_id,
-       t.token,
-       t.${q('isRevoked')} AS is_revoked,
-       t.${q('issuedByUserId')} AS issued_by_user_id,
-       t.${q('issuedAtUtc')} AS issued_at_utc,
-       t.${q('revokedAtUtc')} AS revoked_at_utc,
-       t.${q('revokedByUserId')} AS revoked_by_user_id,
+    `SELECT DISTINCT ON (c.${q('eventParticipantQrCredentialId')})
+       c.${q('eventParticipantQrCredentialId')} AS token_id,
+       er.${q('eventId')} AS event_id,
+       er.${q('studentId')} AS student_id,
+       c.token::text AS token,
+       (c.${q('revokedAtUtc')} IS NOT NULL) AS is_revoked,
+       c.${q('issuedByUserId')} AS issued_by_user_id,
+       c.${q('issuedAtUtc')} AS issued_at_utc,
+       c.${q('revokedAtUtc')} AS revoked_at_utc,
+       c.${q('revokedByUserId')} AS revoked_by_user_id,
        s.${q('studentNumber')} AS student_id_code,
        s.${q('firstName')} AS first_name,
        s.${q('lastName')} AS last_name,
@@ -1122,14 +1270,18 @@ export async function listEventParticipantTokens(
        p.${q('programCode')} AS course,
        se.${q('yearLevel')} AS year_level,
        sec.${q('sectionName')} AS section
-     FROM ${q('EventParticipantTokens')} t
-     JOIN ${q('Students')} s ON s.${q('studentId')} = t.${q('studentId')}
-     LEFT JOIN ${q('StudentEnrollments')} se
-       ON se.${q('studentId')} = t.${q('studentId')} AND se.${q('effectiveToUtc')} IS NULL
-     LEFT JOIN ${q('AcademicPrograms')} p ON p.${q('academicProgramId')} = se.${q('academicProgramId')}
-     LEFT JOIN ${q('Sections')} sec ON sec.${q('sectionId')} = se.${q('sectionId')}
-     WHERE t.${q('eventId')} = $1
-     ORDER BY s.${q('lastName')}, s.${q('firstName')}`,
+     FROM ${q('EventParticipantQrCredentials')} c
+      JOIN ${q('EventRegistrations')} er ON er.${q('eventRegistrationId')} = c.${q('eventRegistrationId')}
+      JOIN ${q('Students')} s ON s.${q('studentId')} = er.${q('studentId')}
+      JOIN ${q('Events')} ev ON ev.${q('eventId')} = er.${q('eventId')}
+      LEFT JOIN ${q('StudentEnrollments')} se
+        ON se.${q('studentId')} = er.${q('studentId')}
+       AND se.${q('academicTermId')} = ev.${q('academicTermId')}
+       AND se.${q('effectiveToUtc')} IS NULL
+      LEFT JOIN ${q('AcademicPrograms')} p ON p.${q('academicProgramId')} = se.${q('academicProgramId')}
+      LEFT JOIN ${q('Sections')} sec ON sec.${q('sectionId')} = se.${q('sectionId')}
+      WHERE er.${q('eventId')} = $1 AND er.${q('registrationStatusCode')} = 'ACTIVE'
+      ORDER BY c.${q('eventParticipantQrCredentialId')}, s.${q('lastName')}, s.${q('firstName')}`,
     [eventId],
   );
 }
@@ -1143,11 +1295,12 @@ export async function revokeEventParticipantToken(
   revokedByUserId: number,
 ): Promise<boolean> {
   const res = await db.query(
-    `UPDATE ${q('EventParticipantTokens')}
-     SET ${q('isRevoked')} = true,
-         ${q('revokedAtUtc')} = clock_timestamp(),
-         ${q('revokedByUserId')} = $2
-     WHERE ${q('tokenId')} = $1 AND ${q('isRevoked')} = false`,
+    `UPDATE ${q('EventParticipantQrCredentials')}
+     SET ${q('revokedAtUtc')} = clock_timestamp(),
+         ${q('revokedByUserId')} = $2,
+         ${q('revocationReason')} = 'Revoked by administrator'
+     WHERE ${q('eventParticipantQrCredentialId')} = $1
+       AND ${q('revokedAtUtc')} IS NULL`,
     [tokenId, revokedByUserId],
   );
   return (res.rowCount ?? 0) > 0;
@@ -1161,19 +1314,49 @@ export async function reissueEventParticipantToken(
   tokenId: number,
   issuedByUserId: number,
 ): Promise<string | null> {
+  const previous = await one<{ event_id: number }>(
+    db,
+    `SELECT er.${q('eventId')} AS event_id
+     FROM ${q('EventParticipantQrCredentials')} c
+     JOIN ${q('EventRegistrations')} er ON er.${q('eventRegistrationId')} = c.${q('eventRegistrationId')}
+     WHERE c.${q('eventParticipantQrCredentialId')} = $1`,
+    [tokenId],
+  );
+  if (!previous) return null;
   const res = await db.query(
-    `UPDATE ${q('EventParticipantTokens')}
-     SET token = gen_random_uuid(),
-         ${q('isRevoked')} = false,
+    `WITH next_token AS (SELECT gen_random_uuid() AS token)
+     UPDATE ${q('EventParticipantQrCredentials')} c
+     SET token = next_token.token,
+         ${q('tokenHash')} = decode(md5(next_token.token::text), 'hex'),
          ${q('issuedByUserId')} = $2,
          ${q('issuedAtUtc')} = clock_timestamp(),
          ${q('revokedAtUtc')} = NULL,
-         ${q('revokedByUserId')} = NULL
-     WHERE ${q('tokenId')} = $1
-     RETURNING token::text`,
+         ${q('revokedByUserId')} = NULL,
+         ${q('revocationReason')} = NULL
+     FROM next_token
+     WHERE c.${q('eventParticipantQrCredentialId')} = $1
+     RETURNING c.token::text`,
     [tokenId, issuedByUserId],
   );
   const row = res.rows[0] as { token: string } | undefined;
+  if (row?.token) {
+    await ignoreMissingRelation(
+      db,
+      `UPDATE ${q('EventParticipantTokens')} t
+       SET token = $2::uuid,
+           ${q('isRevoked')} = false,
+           ${q('issuedByUserId')} = $3,
+           ${q('issuedAtUtc')} = clock_timestamp(),
+           ${q('revokedAtUtc')} = NULL,
+           ${q('revokedByUserId')} = NULL
+       FROM ${q('EventRegistrations')} er, ${q('EventParticipantQrCredentials')} c
+       WHERE c.${q('eventParticipantQrCredentialId')} = $1
+         AND er.${q('eventRegistrationId')} = c.${q('eventRegistrationId')}
+         AND t.${q('eventId')} = er.${q('eventId')}
+         AND t.${q('studentId')} = er.${q('studentId')}`,
+      [tokenId, row.token, issuedByUserId],
+    );
+  }
   return row?.token ?? null;
 }
 
@@ -1188,19 +1371,42 @@ export async function getEventParticipantByToken(
   return one(
     db,
     `SELECT
-       t.${q('studentId')} AS student_id,
+       er.${q('studentId')} AS student_id,
        s.${q('studentNumber')} AS student_id_code,
        ep.${q('eventParticipantId')} AS event_participant_id
-     FROM ${q('EventParticipantTokens')} t
-     JOIN ${q('Students')} s ON s.${q('studentId')} = t.${q('studentId')}
-     JOIN ${q('EventParticipants')} ep ON ep.${q('studentId')} = t.${q('studentId')}
-     JOIN ${q('EventSessions')} es ON es.${q('eventSessionId')} = ep.${q('eventSessionId')}
-     WHERE t.token = $1::uuid
-       AND t.${q('eventId')} = $2
-       AND t.${q('isRevoked')} = false
+      FROM ${q('EventParticipantQrCredentials')} c
+      JOIN ${q('EventRegistrations')} er ON er.${q('eventRegistrationId')} = c.${q('eventRegistrationId')}
+      JOIN ${q('Students')} s ON s.${q('studentId')} = er.${q('studentId')}
+      JOIN ${q('EventParticipants')} ep ON ep.${q('eventRegistrationId')} = er.${q('eventRegistrationId')}
+      JOIN ${q('EventSessions')} es ON es.${q('eventSessionId')} = ep.${q('eventSessionId')}
+      WHERE c.token = $1::uuid
+        AND er.${q('eventId')} = $2
+        AND er.${q('registrationStatusCode')} = 'ACTIVE'
+        AND c.${q('revokedAtUtc')} IS NULL
+       AND (c.${q('expiresAtUtc')} IS NULL OR c.${q('expiresAtUtc')} > clock_timestamp())
        AND es.${q('eventId')} = $2
      LIMIT 1`,
     [token, eventId],
+  );
+}
+
+export async function getRegisteredSessionParticipant(
+  db: Queryable,
+  eventId: number,
+  studentId: number,
+  sessionId: number,
+): Promise<{ event_participant_id: number } | null> {
+  return one(
+    db,
+    `SELECT ep.${q('eventParticipantId')} AS event_participant_id
+     FROM ${q('EventRegistrations')} er
+     JOIN ${q('EventParticipants')} ep
+       ON ep.${q('eventRegistrationId')} = er.${q('eventRegistrationId')}
+     JOIN ${q('EventSessions')} es ON es.${q('eventSessionId')} = ep.${q('eventSessionId')}
+     WHERE er.${q('eventId')} = $1 AND er.${q('studentId')} = $2
+       AND es.${q('eventSessionId')} = $3
+       AND er.${q('registrationStatusCode')} = 'ACTIVE'`,
+    [eventId, studentId, sessionId],
   );
 }
 
@@ -1215,6 +1421,7 @@ export async function publishEvent(
     throw conflict('Closed or cancelled events cannot be reactivated. Create a new event.');
   }
   await ensureEventRoster(db, eventId, actorUserId);
+  await upsertEventParticipantTokens(db, eventId, actorUserId);
   try {
     await db.query(
       `UPDATE ${q('Events')}
@@ -1407,6 +1614,16 @@ export async function deactivateEvent(db: Queryable, id: number): Promise<void> 
     [id],
   );
   await db.query(
+    `INSERT INTO ${q('AttendanceRecords')} (${q('eventParticipantId')}, ${q('lastChangedByUserId')})
+     SELECT ep.${q('eventParticipantId')}, e.${q('createdByUserId')}
+     FROM ${q('EventParticipants')} ep
+     JOIN ${q('EventSessions')} es ON es.${q('eventSessionId')} = ep.${q('eventSessionId')}
+     JOIN ${q('Events')} e ON e.${q('eventId')} = es.${q('eventId')}
+     WHERE e.${q('eventId')} = $1
+     ON CONFLICT (${q('eventParticipantId')}) DO NOTHING`,
+    [id],
+  );
+  await db.query(
     `UPDATE ${q('Events')}
      SET ${q('eventStatusCode')} = 'CLOSED', ${q('updatedAtUtc')} = clock_timestamp()
      WHERE ${q('eventId')} = $1`,
@@ -1426,6 +1643,7 @@ export async function windowsForEvent(db: Queryable, eventId: number): Promise<S
     check_out_opens_at_utc?: Date | null;
     check_out_closes_at_utc?: Date | null;
     requires_check_out?: boolean;
+    is_closed?: boolean;
     sort_order: number;
   }>(
     db,
@@ -1433,7 +1651,8 @@ export async function windowsForEvent(db: Queryable, eventId: number): Promise<S
             ${q('startsAtUtc')} AS starts_at_utc, ${q('endsAtUtc')} AS ends_at_utc,
             ${q('lateAfterUtc')} AS late_after_utc, ${q('checkInClosesAtUtc')} AS check_in_closes_at_utc,
             ${q('checkOutOpensAtUtc')} AS check_out_opens_at_utc, ${q('checkOutClosesAtUtc')} AS check_out_closes_at_utc,
-            ${q('requiresCheckOut')} AS requires_check_out, ${q('sortOrder')} AS sort_order
+            ${q('requiresCheckOut')} AS requires_check_out, ${q('isClosed')} AS is_closed,
+            ${q('sortOrder')} AS sort_order
      FROM ${q('EventSessions')}
      WHERE ${q('eventId')} = $1
      ORDER BY ${q('sortOrder')} ASC, ${q('startsAtUtc')} ASC`,
@@ -1454,6 +1673,7 @@ export async function listAllWindows(db: Queryable): Promise<SessionWindowRow[]>
     check_out_opens_at_utc?: Date | null;
     check_out_closes_at_utc?: Date | null;
     requires_check_out?: boolean;
+    is_closed?: boolean;
     sort_order: number;
   }>(
     db,
@@ -1461,7 +1681,8 @@ export async function listAllWindows(db: Queryable): Promise<SessionWindowRow[]>
             ${q('startsAtUtc')} AS starts_at_utc, ${q('endsAtUtc')} AS ends_at_utc,
             ${q('lateAfterUtc')} AS late_after_utc, ${q('checkInClosesAtUtc')} AS check_in_closes_at_utc,
             ${q('checkOutOpensAtUtc')} AS check_out_opens_at_utc, ${q('checkOutClosesAtUtc')} AS check_out_closes_at_utc,
-            ${q('requiresCheckOut')} AS requires_check_out, ${q('sortOrder')} AS sort_order
+            ${q('requiresCheckOut')} AS requires_check_out, ${q('isClosed')} AS is_closed,
+            ${q('sortOrder')} AS sort_order
      FROM ${q('EventSessions')}
      ORDER BY ${q('sortOrder')} ASC, ${q('startsAtUtc')} ASC`,
   );
@@ -1483,6 +1704,7 @@ export async function getWindowById(
     check_out_opens_at_utc?: Date | null;
     check_out_closes_at_utc?: Date | null;
     requires_check_out?: boolean;
+    is_closed?: boolean;
     sort_order: number;
   }>(
     db,
@@ -1490,7 +1712,8 @@ export async function getWindowById(
             ${q('startsAtUtc')} AS starts_at_utc, ${q('endsAtUtc')} AS ends_at_utc,
             ${q('lateAfterUtc')} AS late_after_utc, ${q('checkInClosesAtUtc')} AS check_in_closes_at_utc,
             ${q('checkOutOpensAtUtc')} AS check_out_opens_at_utc, ${q('checkOutClosesAtUtc')} AS check_out_closes_at_utc,
-            ${q('requiresCheckOut')} AS requires_check_out, ${q('sortOrder')} AS sort_order
+            ${q('requiresCheckOut')} AS requires_check_out, ${q('isClosed')} AS is_closed,
+            ${q('sortOrder')} AS sort_order
      FROM ${q('EventSessions')} WHERE ${q('eventSessionId')} = $1`,
     [id],
   );
@@ -1508,6 +1731,7 @@ export async function insertWindow(
   db: Queryable,
   row: {
     eventId: number;
+    sessionDate?: Date;
     sessionLabel: string;
     startTime: string;
     endTime: string;
@@ -1522,7 +1746,7 @@ export async function insertWindow(
   if (!event) throw new Error('Event not found');
   const termId = await eventTermId(db, row.eventId);
   const bounds = sessionBounds(
-    event.event_date,
+    row.sessionDate ?? event.event_date,
     row.startTime,
     row.endTime,
     row.lateAfter,
@@ -1576,6 +1800,7 @@ export async function updateWindow(
   id: number,
   fields: {
     sessionLabel?: string;
+    sessionDate?: Date;
     startTime: string;
     endTime: string;
     lateAfter?: string | null;
@@ -1590,7 +1815,7 @@ export async function updateWindow(
   const event = await getEventById(db, existing.event_id);
   if (!event) throw new Error('Event not found');
   const bounds = sessionBounds(
-    event.event_date,
+    fields.sessionDate ?? (existing.session_date ? new Date(`${existing.session_date}T00:00:00`) : event.event_date),
     fields.startTime,
     fields.endTime,
     fields.lateAfter !== undefined ? fields.lateAfter : existing.late_after,
@@ -1725,39 +1950,10 @@ async function ensureScanTarget(
   if (!session || session.event_id !== args.eventId) {
     throw new Error('Session window not found for this event');
   }
-  const enrollment = await getOrCreateEnrollment(db, args.studentId);
-  let participant = await one<{ event_participant_id: number }>(
-    db,
-    `SELECT ${q('eventParticipantId')} AS event_participant_id FROM ${q('EventParticipants')}
-     WHERE ${q('eventSessionId')} = $1 AND ${q('studentId')} = $2`,
-    [args.sessionWindowId, args.studentId],
+  const participant = await getRegisteredSessionParticipant(
+    db, args.eventId, args.studentId, args.sessionWindowId,
   );
-  if (!participant) {
-    participant = await one<{ event_participant_id: number }>(
-      db,
-      `INSERT INTO ${q('EventParticipants')} (
-          ${q('eventSessionId')}, ${q('academicTermId')}, ${q('studentEnrollmentId')},
-          ${q('studentId')}, ${q('addedByUserId')}
-       ) VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (${q('eventSessionId')}, ${q('studentId')}) DO NOTHING
-       RETURNING ${q('eventParticipantId')} AS event_participant_id`,
-      [
-        args.sessionWindowId,
-        session.academic_term_id,
-        enrollment.student_enrollment_id,
-        args.studentId,
-        args.actorUserId,
-      ],
-    );
-    if (!participant) {
-      participant = await one<{ event_participant_id: number }>(
-        db,
-        `SELECT ${q('eventParticipantId')} AS event_participant_id FROM ${q('EventParticipants')}
-         WHERE ${q('eventSessionId')} = $1 AND ${q('studentId')} = $2`,
-        [args.sessionWindowId, args.studentId],
-      );
-    }
-  }
+  if (!participant) throw conflict('Student is not registered for this session');
   let record = await one<{ attendance_record_id: number }>(
     db,
     `SELECT ${q('attendanceRecordId')} AS attendance_record_id FROM ${q('AttendanceRecords')}
@@ -2907,7 +3103,27 @@ export async function publishEventRoster(
   eventId: number,
   actorUserId: number,
 ): Promise<{ newRegistrationsCount: number; newParticipantsCount: number }> {
-  await db.query(`CALL ssc.sp_event_roster_generate_from_audience_rules($1, $2, 0, 0)`, [eventId, actorUserId]);
+  const procedure = await one<{ available: string | null }>(
+    db,
+    `SELECT to_regprocedure('ssc.sp_event_roster_generate_from_audience_rules(bigint,integer,integer,integer)')::text AS available`,
+  );
+  if (procedure?.available) {
+    await db.query(`CALL ssc.sp_event_roster_generate_from_audience_rules($1, $2, 0, 0)`, [eventId, actorUserId]);
+  } else {
+    await ensureEventRoster(db, eventId, actorUserId);
+  }
+  await db.query(
+    `UPDATE ${q('EventParticipants')} ep
+     SET ${q('eventRegistrationId')} = er.${q('eventRegistrationId')}
+     FROM ${q('EventSessions')} es, ${q('EventRegistrations')} er
+     WHERE es.${q('eventSessionId')} = ep.${q('eventSessionId')}
+       AND er.${q('eventId')} = es.${q('eventId')}
+       AND er.${q('studentId')} = ep.${q('studentId')}
+       AND es.${q('eventId')} = $1
+       AND ep.${q('eventRegistrationId')} IS NULL`,
+    [eventId],
+  );
+  await upsertEventParticipantTokens(db, eventId, actorUserId);
   await db.query(
     `UPDATE ${q('Events')} SET ${q('eventStatusCode')} = 'PUBLISHED' WHERE ${q('eventId')} = $1`,
     [eventId],
@@ -2940,16 +3156,41 @@ export async function closeSessionAndAssessFines(
     [sessionId],
   );
   await db.query(
-    `CALL ssc.sp_student_fine_assess_closed_session($1, $2, 0, 0)`,
+    `INSERT INTO ${q('AttendanceRecords')} (${q('eventParticipantId')}, ${q('lastChangedByUserId')})
+     SELECT ep.${q('eventParticipantId')}, $2
+     FROM ${q('EventParticipants')} ep
+     WHERE ep.${q('eventSessionId')} = $1
+     ON CONFLICT (${q('eventParticipantId')}) DO NOTHING`,
     [sessionId, actorUserId],
   );
-  const totals = await one<{ count: number; total: number }>(
+  const procedure = await one<{ available: string | null }>(
+    db,
+    `SELECT to_regprocedure('ssc.sp_student_fine_assess_closed_session(bigint,integer,integer,numeric)')::text AS available`,
+  );
+  const fineTables = await one<{ policy: string | null; assessments: string | null }>(
+    db,
+    `SELECT to_regclass('"EventFinePolicies"')::text AS policy,
+       to_regclass('"StudentFineAssessments"')::text AS assessments`,
+  );
+  const finePolicy = fineTables?.policy ? await one<{ active: boolean }>(
+    db,
+    `SELECT EXISTS (
+       SELECT 1 FROM ${q('EventFinePolicies')} p
+       JOIN ${q('EventSessions')} s ON s.${q('eventId')} = p.${q('eventId')}
+       WHERE s.${q('eventSessionId')} = $1 AND p.${q('policyStatusCode')} = 'ACTIVE'
+     ) AS active`,
+    [sessionId],
+  ) : null;
+  if (procedure?.available && finePolicy?.active) {
+    await db.query(`CALL ssc.sp_student_fine_assess_closed_session($1, $2, 0, 0)`, [sessionId, actorUserId]);
+  }
+  const totals = fineTables?.assessments ? await one<{ count: number; total: number }>(
     db,
     `SELECT COUNT(*)::int AS count, COALESCE(SUM(${q('assessedAmount')}), 0.00)::numeric AS total
      FROM ${q('StudentFineAssessments')}
      WHERE ${q('eventSessionId')} = $1`,
     [sessionId],
-  );
+  ) : null;
   return {
     assessmentsCreated: totals?.count ?? 0,
     totalAmountAssessed: Number(totals?.total ?? 0),
@@ -3184,6 +3425,469 @@ export async function getSectionStudentBreakdown(
     students,
   };
 }
+export async function getAcademicHierarchy(db: Queryable): Promise<Record<string, unknown>[]> {
+  return many(
+    db,
+    `SELECT
+       ay.${q('academicYearId')} AS academic_year_id,
+       ay.${q('yearCode')} AS year_code,
+       ay.${q('isActive')} AS is_active,
+       COALESCE(
+         jsonb_agg(
+           jsonb_build_object(
+             'academic_term_id', t.${q('academicTermId')},
+             'term_code', t.${q('termCode')},
+             'term_name', t.${q('termName')},
+             'is_active', t.${q('isActive')},
+             'programs', (
+               SELECT COALESCE(
+                 jsonb_agg(DISTINCT jsonb_build_object(
+                   'academic_program_id', p.${q('academicProgramId')},
+                   'program_code', p.${q('programCode')},
+                   'program_name', p.${q('programName')}
+                 )),
+                 '[]'::jsonb
+               )
+               FROM ${q('Sections')} sec
+               JOIN ${q('AcademicPrograms')} p ON p.${q('academicProgramId')} = sec.${q('academicProgramId')}
+               WHERE sec.${q('academicTermId')} = t.${q('academicTermId')}
+                 AND p.${q('isActive')} = true
+             )
+           ) ORDER BY t.${q('startsOn')} DESC
+         ) FILTER (WHERE t.${q('academicTermId')} IS NOT NULL),
+         '[]'::jsonb
+       ) AS terms
+     FROM ${q('AcademicYears')} ay
+     LEFT JOIN ${q('AcademicTerms')} t ON t.${q('academicYearId')} = ay.${q('academicYearId')} AND t.${q('isActive')} = true
+     WHERE ay.${q('isActive')} = true
+     GROUP BY ay.${q('academicYearId')}
+     ORDER BY ay.${q('startsOn')} DESC`,
+  );
+}
 
+// --- Academic Years ---
 
+export async function listAcademicYears(
+  db: Queryable,
+  filter?: { isActive?: boolean },
+): Promise<any[]> {
+  const conditions: string[] = [];
+  const params: any[] = [];
+  if (filter?.isActive !== undefined) {
+    params.push(filter.isActive);
+    conditions.push(`${q('isActive')} = $${params.length}`);
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  return many(
+    db,
+    `SELECT
+       ${q('academicYearId')} AS academic_year_id,
+       ${q('yearCode')} AS year_code,
+       ${q('yearName')} AS year_name,
+       ${q('startsOn')} AS starts_on,
+       ${q('endsOn')} AS ends_on,
+       ${q('isActive')} AS is_active,
+       ${q('createdAtUtc')} AS created_at_utc
+     FROM ${q('AcademicYears')}
+     ${where}
+     ORDER BY ${q('startsOn')} DESC`,
+    params,
+  );
+}
+
+export async function getAcademicYearById(db: Queryable, id: number): Promise<any | null> {
+  return one(
+    db,
+    `SELECT
+       ${q('academicYearId')} AS academic_year_id,
+       ${q('yearCode')} AS year_code,
+       ${q('yearName')} AS year_name,
+       ${q('startsOn')} AS starts_on,
+       ${q('endsOn')} AS ends_on,
+       ${q('isActive')} AS is_active,
+       ${q('createdAtUtc')} AS created_at_utc
+     FROM ${q('AcademicYears')}
+     WHERE ${q('academicYearId')} = $1`,
+    [id],
+  );
+}
+
+export async function getAcademicYearByCode(db: Queryable, code: string): Promise<any | null> {
+  return one(
+    db,
+    `SELECT
+       ${q('academicYearId')} AS academic_year_id,
+       ${q('yearCode')} AS year_code,
+       ${q('yearName')} AS year_name,
+       ${q('startsOn')} AS starts_on,
+       ${q('endsOn')} AS ends_on,
+       ${q('isActive')} AS is_active
+     FROM ${q('AcademicYears')}
+     WHERE ${q('yearCode')} = $1`,
+    [code],
+  );
+}
+
+export async function insertAcademicYear(
+  db: Queryable,
+  data: {
+    yearCode: string;
+    yearName: string;
+    startsOn: string;
+    endsOn: string;
+    isActive?: boolean;
+  },
+): Promise<any> {
+  const res = await one<any>(
+    db,
+    `INSERT INTO ${q('AcademicYears')} (
+       ${q('yearCode')}, ${q('yearName')}, ${q('startsOn')}, ${q('endsOn')}, ${q('isActive')}
+     ) VALUES ($1, $2, $3::date, $4::date, $5)
+     RETURNING
+       ${q('academicYearId')} AS academic_year_id,
+       ${q('yearCode')} AS year_code,
+       ${q('yearName')} AS year_name,
+       ${q('startsOn')} AS starts_on,
+       ${q('endsOn')} AS ends_on,
+       ${q('isActive')} AS is_active,
+       ${q('createdAtUtc')} AS created_at_utc`,
+    [data.yearCode, data.yearName, data.startsOn, data.endsOn, data.isActive ?? true],
+  );
+  return res!;
+}
+
+export async function updateAcademicYear(
+  db: Queryable,
+  id: number,
+  data: {
+    yearName?: string;
+    startsOn?: string;
+    endsOn?: string;
+    isActive?: boolean;
+  },
+): Promise<any | null> {
+  const sets: string[] = [];
+  const params: any[] = [id];
+
+  if (data.yearName !== undefined) {
+    params.push(data.yearName);
+    sets.push(`${q('yearName')} = $${params.length}`);
+  }
+  if (data.startsOn !== undefined) {
+    params.push(data.startsOn);
+    sets.push(`${q('startsOn')} = $${params.length}::date`);
+  }
+  if (data.endsOn !== undefined) {
+    params.push(data.endsOn);
+    sets.push(`${q('endsOn')} = $${params.length}::date`);
+  }
+  if (data.isActive !== undefined) {
+    params.push(data.isActive);
+    sets.push(`${q('isActive')} = $${params.length}`);
+  }
+
+  if (sets.length === 0) return getAcademicYearById(db, id);
+
+  return one(
+    db,
+    `UPDATE ${q('AcademicYears')}
+     SET ${sets.join(', ')}
+     WHERE ${q('academicYearId')} = $1
+     RETURNING
+       ${q('academicYearId')} AS academic_year_id,
+       ${q('yearCode')} AS year_code,
+       ${q('yearName')} AS year_name,
+       ${q('startsOn')} AS starts_on,
+       ${q('endsOn')} AS ends_on,
+       ${q('isActive')} AS is_active,
+       ${q('createdAtUtc')} AS created_at_utc`,
+    params,
+  );
+}
+
+// --- Academic Terms ---
+
+export async function listAcademicTerms(
+  db: Queryable,
+  filter?: { academicYearId?: number; isActive?: boolean },
+): Promise<any[]> {
+  const conditions: string[] = [];
+  const params: any[] = [];
+  if (filter?.academicYearId !== undefined) {
+    params.push(filter.academicYearId);
+    conditions.push(`t.${q('academicYearId')} = $${params.length}`);
+  }
+  if (filter?.isActive !== undefined) {
+    params.push(filter.isActive);
+    conditions.push(`t.${q('isActive')} = $${params.length}`);
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  return many(
+    db,
+    `SELECT
+       t.${q('academicTermId')} AS academic_term_id,
+       t.${q('academicYearId')} AS academic_year_id,
+       t.${q('termCode')} AS term_code,
+       t.${q('termName')} AS term_name,
+       t.${q('startsOn')} AS starts_on,
+       t.${q('endsOn')} AS ends_on,
+       t.${q('isActive')} AS is_active,
+       t.${q('createdAtUtc')} AS created_at_utc,
+       ay.${q('yearCode')} AS year_code,
+       ay.${q('yearName')} AS year_name
+     FROM ${q('AcademicTerms')} t
+     JOIN ${q('AcademicYears')} ay ON ay.${q('academicYearId')} = t.${q('academicYearId')}
+     ${where}
+     ORDER BY t.${q('startsOn')} DESC`,
+    params,
+  );
+}
+
+export async function getAcademicTermById(db: Queryable, id: number): Promise<any | null> {
+  return one(
+    db,
+    `SELECT
+       t.${q('academicTermId')} AS academic_term_id,
+       t.${q('academicYearId')} AS academic_year_id,
+       t.${q('termCode')} AS term_code,
+       t.${q('termName')} AS term_name,
+       t.${q('startsOn')} AS starts_on,
+       t.${q('endsOn')} AS ends_on,
+       t.${q('isActive')} AS is_active,
+       t.${q('createdAtUtc')} AS created_at_utc,
+       ay.${q('yearCode')} AS year_code,
+       ay.${q('yearName')} AS year_name
+     FROM ${q('AcademicTerms')} t
+     JOIN ${q('AcademicYears')} ay ON ay.${q('academicYearId')} = t.${q('academicYearId')}
+     WHERE t.${q('academicTermId')} = $1`,
+    [id],
+  );
+}
+
+export async function getAcademicTermByCode(
+  db: Queryable,
+  academicYearId: number,
+  termCode: string,
+): Promise<any | null> {
+  return one(
+    db,
+    `SELECT
+       ${q('academicTermId')} AS academic_term_id,
+       ${q('academicYearId')} AS academic_year_id,
+       ${q('termCode')} AS term_code,
+       ${q('termName')} AS term_name,
+       ${q('startsOn')} AS starts_on,
+       ${q('endsOn')} AS ends_on,
+       ${q('isActive')} AS is_active
+     FROM ${q('AcademicTerms')}
+     WHERE ${q('academicYearId')} = $1 AND ${q('termCode')} = $2`,
+    [academicYearId, termCode],
+  );
+}
+
+export async function insertAcademicTerm(
+  db: Queryable,
+  data: {
+    academicYearId: number;
+    termCode: string;
+    termName: string;
+    startsOn: string;
+    endsOn: string;
+    isActive?: boolean;
+  },
+): Promise<any> {
+  const res = await one<any>(
+    db,
+    `INSERT INTO ${q('AcademicTerms')} (
+       ${q('academicYearId')}, ${q('termCode')}, ${q('termName')},
+       ${q('startsOn')}, ${q('endsOn')}, ${q('isActive')}
+     ) VALUES ($1, $2, $3, $4::date, $5::date, $6)
+     RETURNING
+       ${q('academicTermId')} AS academic_term_id,
+       ${q('academicYearId')} AS academic_year_id,
+       ${q('termCode')} AS term_code,
+       ${q('termName')} AS term_name,
+       ${q('startsOn')} AS starts_on,
+       ${q('endsOn')} AS ends_on,
+       ${q('isActive')} AS is_active,
+       ${q('createdAtUtc')} AS created_at_utc`,
+    [
+      data.academicYearId,
+      data.termCode,
+      data.termName,
+      data.startsOn,
+      data.endsOn,
+      data.isActive ?? true,
+    ],
+  );
+  return res!;
+}
+
+export async function updateAcademicTerm(
+  db: Queryable,
+  id: number,
+  data: {
+    termName?: string;
+    startsOn?: string;
+    endsOn?: string;
+    isActive?: boolean;
+  },
+): Promise<any | null> {
+  const sets: string[] = [];
+  const params: any[] = [id];
+
+  if (data.termName !== undefined) {
+    params.push(data.termName);
+    sets.push(`${q('termName')} = $${params.length}`);
+  }
+  if (data.startsOn !== undefined) {
+    params.push(data.startsOn);
+    sets.push(`${q('startsOn')} = $${params.length}::date`);
+  }
+  if (data.endsOn !== undefined) {
+    params.push(data.endsOn);
+    sets.push(`${q('endsOn')} = $${params.length}::date`);
+  }
+  if (data.isActive !== undefined) {
+    params.push(data.isActive);
+    sets.push(`${q('isActive')} = $${params.length}`);
+  }
+
+  if (sets.length === 0) return getAcademicTermById(db, id);
+
+  return one(
+    db,
+    `UPDATE ${q('AcademicTerms')}
+     SET ${sets.join(', ')}
+     WHERE ${q('academicTermId')} = $1
+     RETURNING
+       ${q('academicTermId')} AS academic_term_id,
+       ${q('academicYearId')} AS academic_year_id,
+       ${q('termCode')} AS term_code,
+       ${q('termName')} AS term_name,
+       ${q('startsOn')} AS starts_on,
+       ${q('endsOn')} AS ends_on,
+       ${q('isActive')} AS is_active,
+       ${q('createdAtUtc')} AS created_at_utc`,
+    params,
+  );
+}
+
+// --- Academic Programs ---
+
+export async function listAcademicPrograms(
+  db: Queryable,
+  filter?: { isActive?: boolean },
+): Promise<any[]> {
+  const conditions: string[] = [];
+  const params: any[] = [];
+  if (filter?.isActive !== undefined) {
+    params.push(filter.isActive);
+    conditions.push(`${q('isActive')} = $${params.length}`);
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  return many(
+    db,
+    `SELECT
+       ${q('academicProgramId')} AS academic_program_id,
+       ${q('programCode')} AS program_code,
+       ${q('programName')} AS program_name,
+       ${q('isActive')} AS is_active,
+       ${q('createdAtUtc')} AS created_at_utc
+     FROM ${q('AcademicPrograms')}
+     ${where}
+     ORDER BY ${q('programCode')} ASC`,
+    params,
+  );
+}
+
+export async function getAcademicProgramById(db: Queryable, id: number): Promise<any | null> {
+  return one(
+    db,
+    `SELECT
+       ${q('academicProgramId')} AS academic_program_id,
+       ${q('programCode')} AS program_code,
+       ${q('programName')} AS program_name,
+       ${q('isActive')} AS is_active,
+       ${q('createdAtUtc')} AS created_at_utc
+     FROM ${q('AcademicPrograms')}
+     WHERE ${q('academicProgramId')} = $1`,
+    [id],
+  );
+}
+
+export async function getAcademicProgramByCode(db: Queryable, code: string): Promise<any | null> {
+  return one(
+    db,
+    `SELECT
+       ${q('academicProgramId')} AS academic_program_id,
+       ${q('programCode')} AS program_code,
+       ${q('programName')} AS program_name,
+       ${q('isActive')} AS is_active
+     FROM ${q('AcademicPrograms')}
+     WHERE ${q('programCode')} = $1`,
+    [code],
+  );
+}
+
+export async function insertAcademicProgram(
+  db: Queryable,
+  data: {
+    programCode: string;
+    programName: string;
+    isActive?: boolean;
+  },
+): Promise<any> {
+  const res = await one<any>(
+    db,
+    `INSERT INTO ${q('AcademicPrograms')} (
+       ${q('programCode')}, ${q('programName')}, ${q('isActive')}
+     ) VALUES ($1, $2, $3)
+     RETURNING
+       ${q('academicProgramId')} AS academic_program_id,
+       ${q('programCode')} AS program_code,
+       ${q('programName')} AS program_name,
+       ${q('isActive')} AS is_active,
+       ${q('createdAtUtc')} AS created_at_utc`,
+    [data.programCode, data.programName, data.isActive ?? true],
+  );
+  return res!;
+}
+
+export async function updateAcademicProgram(
+  db: Queryable,
+  id: number,
+  data: {
+    programName?: string;
+    isActive?: boolean;
+  },
+): Promise<any | null> {
+  const sets: string[] = [];
+  const params: any[] = [id];
+
+  if (data.programName !== undefined) {
+    params.push(data.programName);
+    sets.push(`${q('programName')} = $${params.length}`);
+  }
+  if (data.isActive !== undefined) {
+    params.push(data.isActive);
+    sets.push(`${q('isActive')} = $${params.length}`);
+  }
+
+  if (sets.length === 0) return getAcademicProgramById(db, id);
+
+  return one(
+    db,
+    `UPDATE ${q('AcademicPrograms')}
+     SET ${sets.join(', ')}
+     WHERE ${q('academicProgramId')} = $1
+     RETURNING
+       ${q('academicProgramId')} AS academic_program_id,
+       ${q('programCode')} AS program_code,
+       ${q('programName')} AS program_name,
+       ${q('isActive')} AS is_active,
+       ${q('createdAtUtc')} AS created_at_utc`,
+    params,
+  );
+}
 
