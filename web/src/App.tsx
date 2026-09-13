@@ -10,6 +10,7 @@ import type { Role } from './lib/types'
 import { AdminAttendance } from './pages/admin/Attendance'
 import { AdminDashboard } from './pages/admin/Dashboard'
 import { AdminEvents } from './pages/admin/Events'
+import { AdminFineTemplates } from './pages/admin/FineTemplates'
 import { AdminModerators } from './pages/admin/Moderators'
 import { AdminStudents } from './pages/admin/Students'
 import { LoginPage } from './pages/Login'
@@ -61,6 +62,7 @@ export default function App() {
           <Route path="/superadmin" element={<AdminLayout />}>
             <Route index element={<AdminDashboard />} />
             <Route path="events" element={<AdminEvents />} />
+            <Route path="fines" element={<AdminFineTemplates />} />
             <Route path="students" element={<AdminStudents />} />
             <Route path="moderators" element={<AdminModerators />} />
             <Route path="attendance" element={<AdminAttendance />} />

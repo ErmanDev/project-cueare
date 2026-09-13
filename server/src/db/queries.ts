@@ -1,5 +1,5 @@
 import type { AttendanceDetailRow } from '../utils/serialize.ts';
-import { conflict, isPgBusinessRule, isPgUniqueViolation, pgErrorMessage } from '../utils/errors.ts';
+import { badRequest, conflict, isPgBusinessRule, isPgUniqueViolation, pgErrorMessage } from '../utils/errors.ts';
 import { parseMinutes, startOfDay } from '../utils/time.ts';
 import { PROGRAM_NAMES, type MappedImportStudent } from '../students/roster.ts';
 import { escapeLike } from '../utils/studentCode.ts';
@@ -828,6 +828,18 @@ export async function publishEvent(
     }
     throw err;
   }
+  try {
+    await db.query(
+      `UPDATE ${q('EventFinePolicies')}
+       SET ${q('policyStatusCode')} = 'ACTIVE',
+           ${q('activatedAtUtc')} = COALESCE(${q('activatedAtUtc')}, clock_timestamp())
+       WHERE ${q('eventId')} = $1 AND ${q('policyStatusCode')} = 'DRAFT'`,
+      [eventId],
+    );
+  } catch (err) {
+    const code = err && typeof err === 'object' && 'code' in err ? String((err as { code: unknown }).code) : '';
+    if (code !== '42P01') throw err;
+  }
   return (await getEventById(db, eventId))!;
 }
 
@@ -968,6 +980,13 @@ export async function getWindowById(
   return row ? toWindow(row) : null;
 }
 
+function sessionTypeFromLabel(label: string): string {
+  const n = label.trim().toLowerCase();
+  if (n === 'am' || /\b(am|morning)\b/.test(n)) return 'AM';
+  if (n === 'pm' || /\b(pm|afternoon)\b/.test(n)) return 'PM';
+  return 'GENERAL';
+}
+
 export async function insertWindow(
   db: Queryable,
   row: {
@@ -986,17 +1005,18 @@ export async function insertWindow(
   const created = await one<{ event_session_id: number }>(
     db,
     `INSERT INTO ${q('EventSessions')} (
-        ${q('eventId')}, ${q('academicTermId')}, ${q('sessionCode')}, ${q('sessionName')},
+        ${q('eventId')}, ${q('academicTermId')}, ${q('sessionCode')}, ${q('sessionName')}, ${q('sessionTypeCode')},
         ${q('startsAtUtc')}, ${q('endsAtUtc')}, ${q('checkInOpensAtUtc')}, ${q('checkInClosesAtUtc')},
         ${q('lateAfterUtc')}, ${q('checkOutOpensAtUtc')}, ${q('checkOutClosesAtUtc')},
         ${q('requiresCheckOut')}, ${q('sortOrder')}
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,true,$12)
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,true,$13)
      RETURNING ${q('eventSessionId')} AS event_session_id`,
     [
       row.eventId,
       termId,
       code,
       row.sessionLabel,
+      sessionTypeFromLabel(row.sessionLabel),
       bounds.startsAtUtc,
       bounds.endsAtUtc,
       bounds.checkInOpensAtUtc,
@@ -1047,6 +1067,8 @@ export async function updateWindow(
   if (fields.sessionLabel != null) {
     sets.push(`${q('sessionName')} = $${i++}`);
     values.push(fields.sessionLabel);
+    sets.push(`${q('sessionTypeCode')} = $${i++}`);
+    values.push(sessionTypeFromLabel(fields.sessionLabel));
   }
   if (fields.sortOrder != null) {
     sets.push(`${q('sortOrder')} = $${i++}`);
@@ -1432,7 +1454,12 @@ export async function listAttendance(
 
 // --- Fine Policy & Rule Engine Queries ---
 
-export async function listFineTemplates(db: Queryable): Promise<any[]> {
+export async function listFineTemplates(
+  db: Queryable,
+  opts: { includeInactive?: boolean; publishedOnly?: boolean } = {},
+): Promise<any[]> {
+  const includeInactive = opts.includeInactive === true;
+  const publishedOnly = opts.publishedOnly ?? !includeInactive;
   const templates = await many<{
     template_id: number;
     template_code: string;
@@ -1441,6 +1468,7 @@ export async function listFineTemplates(db: Queryable): Promise<any[]> {
     is_active: boolean;
     version_id: number | null;
     version_number: number | null;
+    version_status_code: string | null;
     currency_code: string | null;
     max_fine_per_student: number | null;
   }>(
@@ -1453,20 +1481,58 @@ export async function listFineTemplates(db: Queryable): Promise<any[]> {
        t.${q('isActive')} AS is_active,
        v.${q('finePolicyTemplateVersionId')} AS version_id,
        v.${q('versionNumber')} AS version_number,
+       v.${q('versionStatusCode')} AS version_status_code,
        v.${q('currencyCode')} AS currency_code,
        v.${q('maximumFinePerStudent')} AS max_fine_per_student
      FROM ${q('FinePolicyTemplates')} t
      LEFT JOIN LATERAL (
        SELECT * FROM ${q('FinePolicyTemplateVersions')} pv
        WHERE pv.${q('finePolicyTemplateId')} = t.${q('finePolicyTemplateId')}
-         AND pv.${q('versionStatusCode')} = 'PUBLISHED'
+         ${publishedOnly ? `AND pv.${q('versionStatusCode')} = 'PUBLISHED'` : ''}
        ORDER BY pv.${q('versionNumber')} DESC
        LIMIT 1
      ) v ON TRUE
-     WHERE t.${q('isActive')} = TRUE
+     ${includeInactive ? '' : `WHERE t.${q('isActive')} = TRUE`}
      ORDER BY t.${q('templateName')}`,
   );
 
+  return hydrateFineTemplates(db, templates);
+}
+
+export async function getFineTemplateById(db: Queryable, templateId: number): Promise<any | null> {
+  const rows = await listFineTemplates(db, { includeInactive: true, publishedOnly: false });
+  return rows.find((t) => t.template_id === templateId) ?? null;
+}
+
+export async function setFineTemplateActive(
+  db: Queryable,
+  templateId: number,
+  isActive: boolean,
+): Promise<any | null> {
+  await db.query(
+    `UPDATE ${q('FinePolicyTemplates')}
+     SET ${q('isActive')} = $2, ${q('updatedAtUtc')} = clock_timestamp()
+     WHERE ${q('finePolicyTemplateId')} = $1`,
+    [templateId, isActive],
+  );
+  return getFineTemplateById(db, templateId);
+}
+
+async function hydrateFineTemplates(
+  db: Queryable,
+  templates: Array<{
+    template_id: number;
+    template_code: string;
+    template_name: string;
+    description: string | null;
+    is_active: boolean;
+    version_id: number | null;
+    version_number: number | null;
+    version_status_code?: string | null;
+    currency_code: string | null;
+    max_fine_per_student: number | null;
+  }>,
+): Promise<any[]> {
   const versionIds = templates.map((t) => t.version_id).filter((id): id is number => id != null);
   const rulesMap = new Map<number, any[]>();
   if (versionIds.length > 0) {
@@ -1489,7 +1555,7 @@ export async function listFineTemplates(db: Queryable): Promise<any[]> {
        FROM ${q('FinePolicyTemplateRules')}
        WHERE ${q('finePolicyTemplateVersionId')} = ANY($1::bigint[])
          AND ${q('isActive')} = TRUE
-       ORDER BY ${q('priorityOrder')}`,
+       ORDER BY ${q('priorityOrder')}, ${q('sessionTypeCode')}, ${q('violationCode')}`,
       [versionIds],
     );
     for (const r of rules) {
@@ -1515,8 +1581,9 @@ export async function listFineTemplates(db: Queryable): Promise<any[]> {
       ? {
           version_id: t.version_id,
           version_number: t.version_number,
+          version_status_code: t.version_status_code ?? null,
           currency_code: t.currency_code,
-          max_fine_per_student: t.max_fine_per_student ? Number(t.max_fine_per_student) : null,
+          max_fine_per_student: t.max_fine_per_student != null ? Number(t.max_fine_per_student) : null,
           rules: rulesMap.get(t.version_id) ?? [],
         }
       : null,
@@ -1635,6 +1702,86 @@ export async function getEventFinePolicy(db: Queryable, eventId: number): Promis
   };
 }
 
+export async function latestPublishedTemplateVersionId(
+  db: Queryable,
+  templateId: number,
+): Promise<number | null> {
+  const row = await one<{ version_id: number }>(
+    db,
+    `SELECT v.${q('finePolicyTemplateVersionId')} AS version_id
+     FROM ${q('FinePolicyTemplateVersions')} v
+     JOIN ${q('FinePolicyTemplates')} t
+       ON t.${q('finePolicyTemplateId')} = v.${q('finePolicyTemplateId')}
+     WHERE t.${q('finePolicyTemplateId')} = $1
+       AND t.${q('isActive')} = TRUE
+       AND v.${q('versionStatusCode')} = 'PUBLISHED'
+     ORDER BY v.${q('versionNumber')} DESC
+     LIMIT 1`,
+    [templateId],
+  );
+  return row?.version_id ?? null;
+}
+
+export type EventFineSummary = {
+  policy_id: number;
+  policy_name: string;
+  template_id: number | null;
+  template_name: string | null;
+  version_id: number | null;
+  max_fine_per_student: number | null;
+};
+
+export async function listEventFineSummaries(
+  db: Queryable,
+  eventIds?: number[],
+): Promise<Map<number, EventFineSummary>> {
+  const map = new Map<number, EventFineSummary>();
+  let rows: Array<{
+    event_id: number;
+    policy_id: number;
+    policy_name: string;
+    template_id: number | null;
+    template_name: string | null;
+    version_id: number | null;
+    max_fine: number | null;
+  }>;
+  try {
+    rows = await many(
+      db,
+      `SELECT
+         p.${q('eventId')} AS event_id,
+         p.${q('eventFinePolicyId')} AS policy_id,
+         p.${q('policyName')} AS policy_name,
+         t.${q('finePolicyTemplateId')} AS template_id,
+         t.${q('templateName')} AS template_name,
+         v.${q('finePolicyTemplateVersionId')} AS version_id,
+         p.${q('maximumFinePerStudent')} AS max_fine
+       FROM ${q('EventFinePolicies')} p
+       LEFT JOIN ${q('FinePolicyTemplateVersions')} v
+         ON v.${q('finePolicyTemplateVersionId')} = p.${q('sourceFinePolicyTemplateVersionId')}
+       LEFT JOIN ${q('FinePolicyTemplates')} t
+         ON t.${q('finePolicyTemplateId')} = v.${q('finePolicyTemplateId')}
+       ${eventIds && eventIds.length > 0 ? `WHERE p.${q('eventId')} = ANY($1::bigint[])` : ''}`,
+      eventIds && eventIds.length > 0 ? [eventIds] : [],
+    );
+  } catch (err) {
+    const code = err && typeof err === 'object' && 'code' in err ? String((err as { code: unknown }).code) : '';
+    if (code === '42P01') return map;
+    throw err;
+  }
+  for (const row of rows) {
+    map.set(row.event_id, {
+      policy_id: row.policy_id,
+      policy_name: row.policy_name,
+      template_id: row.template_id,
+      template_name: row.template_name,
+      version_id: row.version_id,
+      max_fine_per_student: row.max_fine != null ? Number(row.max_fine) : null,
+    });
+  }
+  return map;
+}
+
 export async function applyFinePolicyTemplateToEvent(
   db: Queryable,
   params: {
@@ -1645,18 +1792,104 @@ export async function applyFinePolicyTemplateToEvent(
     actorUserId: number;
   },
 ): Promise<number> {
-  const row = await one<{ policy_id: number }>(
+  const version = await one<{
+    version_id: number;
+    currency_code: string;
+    max_fine: number | null;
+  }>(
     db,
-    `SELECT sp_event_fine_policy_create_from_template($1, $2, $3, $4, $5) AS policy_id`,
+    `SELECT
+       v.${q('finePolicyTemplateVersionId')} AS version_id,
+       v.${q('currencyCode')} AS currency_code,
+       v.${q('maximumFinePerStudent')} AS max_fine
+     FROM ${q('FinePolicyTemplateVersions')} v
+     WHERE v.${q('finePolicyTemplateVersionId')} = $1
+       AND v.${q('versionStatusCode')} = 'PUBLISHED'`,
+    [params.templateVersionId],
+  );
+  if (!version) throw badRequest('Published template version was not found.');
+
+  const status = await eventStatusCode(db, params.eventId);
+  const policyStatus = status === 'PUBLISHED' ? 'ACTIVE' : 'DRAFT';
+
+  const policy = await one<{ policy_id: number }>(
+    db,
+    `INSERT INTO ${q('EventFinePolicies')} (
+       ${q('eventId')}, ${q('sourceFinePolicyTemplateVersionId')},
+       ${q('policyCode')}, ${q('policyName')}, ${q('currencyCode')},
+       ${q('maximumFinePerStudent')}, ${q('policyStatusCode')}, ${q('createdByUserId')},
+       ${q('activatedAtUtc')}
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     ON CONFLICT (${q('eventId')}) DO UPDATE SET
+       ${q('sourceFinePolicyTemplateVersionId')} = EXCLUDED.${q('sourceFinePolicyTemplateVersionId')},
+       ${q('policyCode')} = EXCLUDED.${q('policyCode')},
+       ${q('policyName')} = EXCLUDED.${q('policyName')},
+       ${q('currencyCode')} = EXCLUDED.${q('currencyCode')},
+       ${q('maximumFinePerStudent')} = EXCLUDED.${q('maximumFinePerStudent')},
+       ${q('policyStatusCode')} = EXCLUDED.${q('policyStatusCode')},
+       ${q('activatedAtUtc')} = CASE
+         WHEN EXCLUDED.${q('policyStatusCode')} = 'ACTIVE'
+         THEN COALESCE(${q('EventFinePolicies')}.${q('activatedAtUtc')}, clock_timestamp())
+         ELSE ${q('EventFinePolicies')}.${q('activatedAtUtc')}
+       END
+     RETURNING ${q('eventFinePolicyId')} AS policy_id`,
     [
       params.eventId,
       params.templateVersionId,
       params.policyCode,
       params.policyName,
+      version.currency_code,
+      version.max_fine,
+      policyStatus,
       params.actorUserId,
+      policyStatus === 'ACTIVE' ? new Date() : null,
     ],
   );
-  return row!.policy_id;
+
+  const policyId = policy!.policy_id;
+  await db.query(
+    `UPDATE ${q('EventFineRules')} SET ${q('isActive')} = FALSE WHERE ${q('eventFinePolicyId')} = $1`,
+    [policyId],
+  );
+
+  await db.query(
+    `WITH candidate_rules AS (
+       SELECT
+         s.${q('eventSessionId')} AS session_id,
+         r.${q('finePolicyTemplateRuleId')} AS source_rule_id,
+         r.${q('violationCode')} AS violation_code,
+         r.${q('fineAmount')} AS fine_amount,
+         r.${q('priorityOrder')} AS priority_order,
+         ROW_NUMBER() OVER (
+           PARTITION BY s.${q('eventSessionId')}, r.${q('violationCode')}
+           ORDER BY CASE WHEN r.${q('sessionTypeCode')} = s.${q('sessionTypeCode')} THEN 0 ELSE 1 END,
+                    r.${q('priorityOrder')}
+         ) AS choice_order
+       FROM ${q('EventSessions')} s
+       JOIN ${q('FinePolicyTemplateRules')} r
+         ON r.${q('finePolicyTemplateVersionId')} = $2
+        AND r.${q('isActive')} = TRUE
+        AND r.${q('sessionTypeCode')} IN ('GENERAL', s.${q('sessionTypeCode')})
+       WHERE s.${q('eventId')} = $3
+     )
+     INSERT INTO ${q('EventFineRules')} (
+       ${q('eventFinePolicyId')}, ${q('eventId')}, ${q('eventSessionId')},
+       ${q('sourceFinePolicyTemplateRuleId')}, ${q('violationCode')}, ${q('fineAmount')},
+       ${q('priorityOrder')}, ${q('isActive')}
+     )
+     SELECT $1, $3, c.session_id, c.source_rule_id, c.violation_code, c.fine_amount, c.priority_order, TRUE
+     FROM candidate_rules c
+     WHERE c.choice_order = 1
+     ON CONFLICT (${q('eventFinePolicyId')}, ${q('eventSessionId')}, ${q('violationCode')})
+     DO UPDATE SET
+       ${q('fineAmount')} = EXCLUDED.${q('fineAmount')},
+       ${q('priorityOrder')} = EXCLUDED.${q('priorityOrder')},
+       ${q('sourceFinePolicyTemplateRuleId')} = EXCLUDED.${q('sourceFinePolicyTemplateRuleId')},
+       ${q('isActive')} = TRUE`,
+    [policyId, params.templateVersionId, params.eventId],
+  );
+
+  return policyId;
 }
 
 export type UpsertFineRuleInput = {
@@ -2019,21 +2252,29 @@ export async function upsertFineTemplateWithVersion(
   const verNum = params.versionNumber ?? 1;
   const status = params.publish ? 'PUBLISHED' : 'DRAFT';
   const currency = params.currencyCode || 'PHP';
+  const publishedAt = params.publish ? new Date() : null;
 
   const verRow = await one<{ version_id: number }>(
     db,
     `INSERT INTO ${q('FinePolicyTemplateVersions')} (
        ${q('finePolicyTemplateId')}, ${q('versionNumber')}, ${q('versionStatusCode')},
        ${q('currencyCode')}, ${q('maximumFinePerStudent')}, ${q('createdByUserId')}, ${q('publishedAtUtc')}
-     ) VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $3 = 'PUBLISHED' THEN clock_timestamp() ELSE NULL END)
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7)
      ON CONFLICT (${q('finePolicyTemplateId')}, ${q('versionNumber')}) DO UPDATE
      SET ${q('versionStatusCode')} = EXCLUDED.${q('versionStatusCode')},
          ${q('maximumFinePerStudent')} = EXCLUDED.${q('maximumFinePerStudent')},
-         ${q('publishedAtUtc')} = CASE WHEN EXCLUDED.${q('versionStatusCode')} = 'PUBLISHED' THEN clock_timestamp() ELSE ${q('FinePolicyTemplateVersions')}.${q('publishedAtUtc')} END
+         ${q('publishedAtUtc')} = COALESCE(EXCLUDED.${q('publishedAtUtc')}, ${q('FinePolicyTemplateVersions')}.${q('publishedAtUtc')})
      RETURNING ${q('finePolicyTemplateVersionId')} AS version_id`,
-    [templateId, verNum, status, currency, params.maximumFinePerStudent ?? null, params.actorUserId],
+    [templateId, verNum, status, currency, params.maximumFinePerStudent ?? null, params.actorUserId, publishedAt],
   );
   const versionId = verRow!.version_id;
+
+  await db.query(
+    `UPDATE ${q('FinePolicyTemplateRules')}
+     SET ${q('isActive')} = FALSE
+     WHERE ${q('finePolicyTemplateVersionId')} = $1`,
+    [versionId],
+  );
 
   for (const r of params.rules) {
     await db.query(

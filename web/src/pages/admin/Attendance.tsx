@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Download, Pencil, Plus, Search, Trash2 } from 'lucide-react'
+import { Download, Pencil, Search, Trash2 } from 'lucide-react'
 
 import { Button, EmptyState, Field, FormActions, Modal, TableSkeleton, onSubmit } from '../../components/ui'
 import { api } from '../../lib/api'
 import { fmtDateTime, fmtTime, fmtYearLevel } from '../../lib/format'
 import { useToast } from '../../lib/toast'
 import type { AttendanceLog, AttendanceQuery, Event, SessionWindow } from '../../lib/types'
-import { EventForm } from './Events'
 
 export function AdminAttendance() {
   const { toast } = useToast()
@@ -16,7 +15,6 @@ export function AdminAttendance() {
   const [filter, setFilter] = useState<AttendanceQuery>({})
   const [search, setSearch] = useState('')
   const [editing, setEditing] = useState<AttendanceLog | null>(null)
-  const [creatingEvent, setCreatingEvent] = useState(false)
   const [exporting, setExporting] = useState(false)
 
   const selected = events.find((e) => e.id === filter.event_id)
@@ -106,14 +104,9 @@ export function AdminAttendance() {
           <h2>Attendance records</h2>
           <p>Filter, correct, delete, export CSV</p>
         </div>
-        <div className="toolbar">
-          <Button variant="secondary" onClick={() => void exportCsv()} disabled={exporting}>
-            <Download size={16} /> {exporting ? 'Exporting…' : 'Export CSV'}
-          </Button>
-          <Button onClick={() => setCreatingEvent(true)}>
-            <Plus size={18} /> Create Event
-          </Button>
-        </div>
+        <Button variant="secondary" onClick={() => void exportCsv()} disabled={exporting}>
+          <Download size={16} /> {exporting ? 'Exporting…' : 'Export CSV'}
+        </Button>
       </div>
       <div className="filter-bar">
         <div className="search">
@@ -268,16 +261,6 @@ export function AdminAttendance() {
           ) : null}
         </div>
       )}
-      {creatingEvent ? (
-        <EventForm
-          existing={null}
-          onClose={() => setCreatingEvent(false)}
-          onSaved={() => {
-            setCreatingEvent(false)
-            void loadEvents()
-          }}
-        />
-      ) : null}
       {editing ? (
         <EditAttendance
           log={editing}

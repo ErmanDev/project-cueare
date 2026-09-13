@@ -40,9 +40,9 @@ export function mountRestApi(app: Express, prefix = ''): void {
   app.post(`${p}/auth/login`, authRouter.login);
   app.get(`${p}/auth/me`, ...authRouter.me);
 
-  // Anonymous fine templates endpoint
+  // Published templates for events / anonymous clients
   app.get(
-    [`${p}/fine-templates`, `${p}/admin/fine-templates`],
+    `${p}/fine-templates`,
     asyncHandler(async (_req, res) => {
       const templates = await listFineTemplates(getPool());
       res.json(templates);

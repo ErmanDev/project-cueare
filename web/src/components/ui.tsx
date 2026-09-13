@@ -1,4 +1,4 @@
-import { type CSSProperties, type FormEvent, type ReactNode } from 'react'
+import { type CSSProperties, type FormEvent, type ReactNode, useEffect } from 'react'
 
 import { Logo } from './Logo'
 
@@ -73,6 +73,18 @@ export function Modal({
   onClose: () => void
   wide?: boolean
 }) {
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      previous?.focus()
+    }
+  }, [onClose])
+
   return (
     <div
       className="modal-backdrop"
@@ -81,7 +93,12 @@ export function Modal({
         if (e.target === e.currentTarget) onClose()
       }}
     >
-      <div className={`modal${wide ? ' wide' : ''}`} role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div
+        className={`modal${wide ? ' wide' : ''}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="modal-title"
+      >
         <h3 id="modal-title">{title}</h3>
         {children}
       </div>
@@ -357,6 +374,10 @@ export function BootSkeleton() {
                 <Bone width={168} height={28} />
                 <Bone width={240} height={14} />
               </div>
+              <div className="home-now">
+                <Bone width={88} height={24} />
+                <Bone width={148} height={12} />
+              </div>
             </div>
             <div className="card welcome-card">
               <Bone width={52} height={52} radius="50%" />
@@ -365,17 +386,19 @@ export function BootSkeleton() {
                 <Bone width="26%" height={12} />
               </div>
             </div>
-            <nav className="home-tiles" aria-hidden="true">
-              {[0, 1, 2, 3].map((i) => (
-                <article key={i} className="card card-click">
-                  <Bone width={44} height={44} radius={12} />
-                  <div className="grow skeleton-stack">
-                    <Bone width={`${38 + (i % 3) * 10}%`} height={16} />
-                    <Bone width={`${56 + (i % 2) * 12}%`} height={12} />
+            <div className="card cal-board" aria-hidden="true">
+              <div className="cal-toolbar">
+                <Bone width={160} height={22} />
+                <Bone width={120} height={32} radius={10} />
+              </div>
+              <div className="cal-grid">
+                {Array.from({ length: 14 }, (_, i) => (
+                  <div key={i} className="cal-day">
+                    <Bone width={18} height={12} />
                   </div>
-                </article>
-              ))}
-            </nav>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       </main>

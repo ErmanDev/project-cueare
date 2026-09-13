@@ -5,7 +5,7 @@ import { hashPassword } from '../auth/password.ts';
 import * as q from '../db/queries.ts';
 import { getPool } from '../db/pool.ts';
 import { withTransaction } from '../db/pool.ts';
-import { DIRECTION, SCAN_STATUS, type StudentRow } from '../types.ts';
+import { DIRECTION, SCAN_STATUS, type Queryable, type StudentRow } from '../types.ts';
 import { badRequest, conflict, notFound } from '../utils/errors.ts';
 import { mapImportRow, rowsFromSpreadsheet } from '../students/roster.ts';
 import { detectDelimiter, encodeCsv, parseCsv } from '../utils/csv.ts';
@@ -36,6 +36,39 @@ import { asyncHandler } from './auth.ts';
 
 function service(req: Request): AttendanceService {
   return req.app.locals.attendance as AttendanceService;
+}
+
+async function applyEventFineTemplate(
+  db: Queryable,
+  eventId: number,
+  templateId: number,
+  actorUserId: number,
+  eventName: string,
+): Promise<void> {
+  const versionId = await q.latestPublishedTemplateVersionId(db, templateId);
+  if (!versionId) throw badRequest('Select a published fine template');
+  await q.applyFinePolicyTemplateToEvent(db, {
+    eventId,
+    templateVersionId: versionId,
+    policyCode: `FP-EVT-${eventId}`,
+    policyName: `${eventName} fines`,
+    actorUserId,
+  });
+}
+
+async function withFinePolicy<T extends { id?: unknown }>(payload: T, eventId: number) {
+  const summaries = await q.listEventFineSummaries(getPool(), [eventId]);
+  return { ...payload, fine_policy: summaries.get(eventId) ?? null };
+}
+
+function optionalMoney(body: Record<string, unknown>, key: string): number | null {
+  const v = body[key];
+  if (v == null || v === '') return null;
+  const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : NaN;
+  if (!Number.isFinite(n) || n < 0) {
+    throw badRequest(`Field "${key}" must be a number of 0 or more`);
+  }
+  return n;
 }
 
 export const adminRouter = Router();
@@ -212,11 +245,16 @@ adminRouter.get(
     await svc.deactivateExpiredEvents();
     const events = await q.listEvents(getPool());
     const windows = await q.listAllWindows(getPool());
+    const policies = await q.listEventFineSummaries(
+      getPool(),
+      events.map((e) => e.id),
+    );
     const now = svc.now();
     res.json(
       events.map((e) => ({
         ...eventToApi(e, now),
         session_windows: windows.filter((w) => w.event_id === e.id).map(windowToApi),
+        fine_policy: policies.get(e.id) ?? null,
       })),
     );
   }),
@@ -232,6 +270,7 @@ adminRouter.post(
     svc.requireEventDateNotPast(date);
     const isActive = optionalBool(body, 'is_active') ?? true;
     const rawWindows = body.session_windows;
+    const fineTemplateId = optionalInt(body, 'fine_template_id');
 
     let createdEventId = 0;
     const result = await withTransaction(getPool(), async (client) => {
@@ -265,6 +304,9 @@ adminRouter.post(
           });
         }
       }
+      if (fineTemplateId) {
+        await applyEventFineTemplate(client, event.id, fineTemplateId, req.auth!.id, name);
+      }
       if (isActive) {
         await q.publishEvent(client, event.id, req.auth!.id);
       }
@@ -276,7 +318,7 @@ adminRouter.post(
       };
     });
     svc.invalidateEvent(createdEventId);
-    res.status(201).json(result);
+    res.status(201).json(await withFinePolicy(result, createdEventId));
   }),
 );
 
@@ -334,10 +376,15 @@ adminRouter.get(
     const existing = await q.getEventById(getPool(), id);
     if (!existing) throw notFound('Event not found');
     const windows = await svc.windowsForEvent(id);
-    res.json({
-      ...eventToApi(existing, svc.now()),
-      session_windows: windows.map(windowToApi),
-    });
+    res.json(
+      await withFinePolicy(
+        {
+          ...eventToApi(existing, svc.now()),
+          session_windows: windows.map(windowToApi),
+        },
+        id,
+      ),
+    );
   }),
 );
 
@@ -356,17 +403,29 @@ adminRouter.put(
     if (isActive) {
       svc.requireEventDateNotPast(date ?? existing.event_date);
     }
-    const updated = await q.updateEvent(getPool(), id, {
-      name: name ?? undefined,
-      eventDate: date ?? undefined,
-      isActive: isActive ?? undefined,
+    const fineTemplateId = hasKey(body, 'fine_template_id') ? optionalInt(body, 'fine_template_id') : null;
+    const updated = await withTransaction(getPool(), async (client) => {
+      const event = await q.updateEvent(client, id, {
+        name: name ?? undefined,
+        eventDate: date ?? undefined,
+        isActive: isActive ?? undefined,
+      });
+      if (fineTemplateId) {
+        await applyEventFineTemplate(client, id, fineTemplateId, req.auth!.id, event.name);
+      }
+      return event;
     });
     svc.invalidateEvent(id);
     const windows = await svc.windowsForEvent(id);
-    res.json({
-      ...eventToApi(updated, svc.now()),
-      session_windows: windows.map(windowToApi),
-    });
+    res.json(
+      await withFinePolicy(
+        {
+          ...eventToApi(updated, svc.now()),
+          session_windows: windows.map(windowToApi),
+        },
+        id,
+      ),
+    );
   }),
 );
 
@@ -735,9 +794,26 @@ function fromCsv(text: string): Record<string, unknown>[] {
 
 adminRouter.get(
   '/fine-templates',
-  asyncHandler(async (_req, res) => {
-    const templates = await q.listFineTemplates(getPool());
+  asyncHandler(async (req, res) => {
+    const publishedOnly = queryString(req, 'published') === '1';
+    const templates = await q.listFineTemplates(getPool(), {
+      includeInactive: !publishedOnly,
+      publishedOnly,
+    });
     res.json(templates);
+  }),
+);
+
+adminRouter.put(
+  '/fine-templates/:id',
+  asyncHandler(async (req, res) => {
+    const id = parsePathId(req.params.id);
+    const body = jsonObject(req);
+    const isActive = optionalBool(body, 'is_active');
+    if (isActive == null) throw badRequest('Field "is_active" is required');
+    const updated = await q.setFineTemplateActive(getPool(), id, isActive);
+    if (!updated) throw notFound('Fine template not found');
+    res.json(updated);
   }),
 );
 
@@ -932,8 +1008,9 @@ adminRouter.post(
     const description = optionalString(body, 'description');
     const versionNumber = optionalInt(body, 'version_number') ?? 1;
     const currencyCode = optionalString(body, 'currency_code') ?? 'PHP';
-    const maximumFinePerStudent = typeof body.maximum_fine_per_student === 'number' ? body.maximum_fine_per_student : null;
+    const maximumFinePerStudent = optionalMoney(body, 'maximum_fine_per_student');
     const publish = optionalBool(body, 'publish') ?? true;
+    const isActive = optionalBool(body, 'is_active');
     const rawRules = Array.isArray(body.rules) ? (body.rules as any[]) : [];
 
     const rules = rawRules.map((r) => ({
@@ -942,9 +1019,12 @@ adminRouter.post(
       fineAmount: Number(r.fine_amount ?? 0),
       priorityOrder: r.priority_order != null ? Number(r.priority_order) : 100,
     }));
+    if (rules.some((r) => !r.violationCode || !Number.isFinite(r.fineAmount) || r.fineAmount < 0)) {
+      throw badRequest('Each rule needs a violation_code and a fine_amount of 0 or more');
+    }
 
     const result = await withTransaction(getPool(), async (client) => {
-      return q.upsertFineTemplateWithVersion(client, {
+      const saved = await q.upsertFineTemplateWithVersion(client, {
         templateCode,
         templateName,
         description,
@@ -955,10 +1035,13 @@ adminRouter.post(
         actorUserId: req.auth!.id,
         rules,
       });
+      if (isActive != null) {
+        await q.setFineTemplateActive(client, saved.templateId, isActive);
+      }
+      return saved;
     });
 
-    const allTemplates = await q.listFineTemplates(getPool());
-    const matched = allTemplates.find((t) => t.template_id === result.templateId);
+    const matched = await q.getFineTemplateById(getPool(), result.templateId);
     res.status(201).json(matched ?? result);
   }),
 );

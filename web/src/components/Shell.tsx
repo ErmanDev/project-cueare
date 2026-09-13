@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   LogOut,
   QrCode,
+  Scale,
 } from 'lucide-react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 
@@ -17,6 +18,7 @@ import { Logo } from './Logo'
 const adminNav = [
   { to: '/superadmin', label: 'Home', icon: LayoutDashboard, end: true },
   { to: '/superadmin/events', label: 'Events', icon: CalendarDays },
+  { to: '/superadmin/fines', label: 'Fines', icon: Scale },
   { to: '/superadmin/students', label: 'Students', icon: GraduationCap },
   { to: '/superadmin/moderators', label: 'Moderators', icon: IdCard },
   { to: '/superadmin/attendance', label: 'Attendance', icon: ClipboardCheck },

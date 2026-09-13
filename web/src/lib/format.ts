@@ -101,3 +101,15 @@ export function fmtYearLevel(level: number | null | undefined): string {
             : 'th'
   return `${level}${suffix} Year`
 }
+
+const phpFmt = new Intl.NumberFormat('en-PH', {
+  style: 'currency',
+  currency: 'PHP',
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 2,
+})
+
+export function phpAmount(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return '—'
+  return phpFmt.format(value)
+}

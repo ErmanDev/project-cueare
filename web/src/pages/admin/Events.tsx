@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Pencil, Plus, Trash2 } from 'lucide-react'
+import { Link } from 'react-router-dom'
 
 import { Button, EmptyState, Field, FormActions, Modal, TableSkeleton, onSubmit } from '../../components/ui'
 import { api } from '../../lib/api'
-import { fmtRange, fmtWeekday, isToday, minutes, ymd } from '../../lib/format'
+import { fmtRange, fmtWeekday, isToday, minutes, phpAmount, ymd } from '../../lib/format'
 import { useToast } from '../../lib/toast'
-import type { Event, SessionWindow, WindowDraft } from '../../lib/types'
+import type { Event, FineTemplate, SessionWindow, WindowDraft } from '../../lib/types'
 
 const defaultWindows: WindowDraft[] = [
   { label: 'Morning', start: '07:00', end: '12:00' },
@@ -29,6 +30,18 @@ function validateWindows(windows: WindowDraft[]): string | null {
     }
   }
   return null
+}
+
+function sessionLabel(code: string): string {
+  if (code === 'GENERAL') return 'General'
+  return code
+}
+
+function violationLabel(code: string): string {
+  if (code === 'MISSED_CHECKOUT') return 'Missed checkout'
+  if (code === 'ABSENT') return 'Absent'
+  if (code === 'LATE') return 'Late'
+  return code.replace(/_/g, ' ').toLowerCase().replace(/^\w/, (c) => c.toUpperCase())
 }
 
 export function AdminEvents() {
@@ -82,7 +95,7 @@ export function AdminEvents() {
       <div className="page-head">
         <div>
           <h2>Events</h2>
-          <p>Create events and Morning / Afternoon windows</p>
+          <p>Create events, session windows, and attach a fine template</p>
         </div>
         <Button onClick={() => setEditing('new')}>
           <Plus size={18} /> New event
@@ -98,6 +111,7 @@ export function AdminEvents() {
             { label: 'Event', width: '68%' },
             { label: 'Date', variant: 'chip', width: 88 },
             { label: 'Sessions', variant: 'chips' },
+            { label: 'Fines', variant: 'chip', width: 140 },
             { label: 'Status', variant: 'chip', width: 72 },
             { label: '', variant: 'actions' },
           ]}
@@ -105,7 +119,7 @@ export function AdminEvents() {
       ) : events && events.length === 0 ? (
         <EmptyState
           title="No events yet"
-          subtitle="Create an event and define its Morning / Afternoon sessions."
+          subtitle="Create an event, define its sessions, and optionally attach a fine template."
         />
       ) : (
         <div className="card table-card">
@@ -116,6 +130,7 @@ export function AdminEvents() {
                   <th>Event</th>
                   <th>Date</th>
                   <th>Sessions</th>
+                  <th>Fines</th>
                   <th>Status</th>
                   <th />
                 </tr>
@@ -145,6 +160,15 @@ export function AdminEvents() {
                               </span>
                             ))}
                           </div>
+                        )}
+                      </td>
+                      <td>
+                        {e.fine_policy?.template_name || e.fine_policy?.policy_name ? (
+                          <span className="chip chip-window">
+                            {e.fine_policy.template_name ?? e.fine_policy.policy_name}
+                          </span>
+                        ) : (
+                          <span className="muted">—</span>
                         )}
                       </td>
                       <td>
@@ -220,7 +244,20 @@ export function EventForm({
       : defaultWindows,
   )
   const [busy, setBusy] = useState(false)
+  const [templates, setTemplates] = useState<FineTemplate[] | null>(null)
+  const [templateId, setTemplateId] = useState(
+    existing?.fine_policy?.template_id != null ? String(existing.fine_policy.template_id) : '',
+  )
   const minDate = useMemo(() => ymd(new Date()), [])
+  const published = templates ?? []
+  const selectedTemplate = published.find((t) => String(t.template_id) === templateId) ?? null
+
+  useEffect(() => {
+    void api
+      .get<FineTemplate[]>('/admin/fine-templates', { published: 1 })
+      .then((list) => setTemplates(list.filter((t) => t.active_version)))
+      .catch(() => setTemplates([]))
+  }, [])
 
   async function save() {
     const err = validateWindows(windows)
@@ -235,6 +272,7 @@ export function EventForm({
           name: name.trim(),
           event_date: date,
           is_active: active,
+          fine_template_id: templateId ? Number(templateId) : null,
         })
       } else {
         await api.post('/admin/events', {
@@ -246,6 +284,7 @@ export function EventForm({
             start_time: w.start,
             end_time: w.end,
           })),
+          fine_template_id: templateId ? Number(templateId) : undefined,
         })
       }
       toast(isEdit ? 'Event saved' : 'Event created')
@@ -386,6 +425,43 @@ export function EventForm({
             </div>
           </div>
         ))}
+        <Field label="Fine template">
+          <select value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
+            <option value="">None</option>
+            {published.map((t) => (
+              <option key={t.template_id} value={t.template_id}>
+                {t.template_name}
+              </option>
+            ))}
+          </select>
+        </Field>
+        {templates == null ? null : templates.length === 0 ? (
+          <p className="field-note">
+            No published templates.{' '}
+            <Link to="/superadmin/fines">Open Fine templates</Link>
+          </p>
+        ) : selectedTemplate?.active_version ? (
+          <div className="windows">
+            {selectedTemplate.active_version.rules.map((r) => (
+              <span
+                key={`${r.session_type_code}-${r.violation_code}-${r.priority_order}`}
+                className="chip chip-window"
+              >
+                {sessionLabel(r.session_type_code)} · {violationLabel(r.violation_code)} ·{' '}
+                {phpAmount(r.fine_amount)}
+              </span>
+            ))}
+            <span className="muted">
+              Max {phpAmount(selectedTemplate.active_version.max_fine_per_student)}
+            </span>
+          </div>
+        ) : existing?.fine_policy && !templateId ? (
+          <p className="field-note">
+            {existing.fine_policy.policy_name} is already on this event. Pick a template to replace it.
+          </p>
+        ) : (
+          <p className="field-note">Optional. Copies published rates onto this event’s sessions.</p>
+        )}
         <FormActions onCancel={onClose} submitLabel={isEdit ? 'Save' : 'Create'} busy={busy} />
       </form>
     </Modal>

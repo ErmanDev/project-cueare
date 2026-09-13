@@ -38,6 +38,15 @@ export type SessionWindow = {
   sort_order: number
 }
 
+export type EventFineSummary = {
+  policy_id: number
+  policy_name: string
+  template_id: number | null
+  template_name: string | null
+  version_id?: number | null
+  max_fine_per_student: number | null
+}
+
 export type Event = {
   id: number
   name: string
@@ -48,6 +57,7 @@ export type Event = {
   session_windows: SessionWindow[]
   is_today?: boolean
   current_session_window_id?: number | null
+  fine_policy?: EventFineSummary | null
 }
 
 export type AttendanceLog = {
@@ -111,4 +121,30 @@ export type WindowDraft = {
   label: string
   start: string
   end: string
+}
+
+export type FineTemplateRule = {
+  rule_id?: number
+  session_type_code: string
+  violation_code: string
+  fine_amount: number
+  priority_order: number
+}
+
+export type FineTemplateVersion = {
+  version_id: number
+  version_number: number
+  version_status_code: 'DRAFT' | 'PUBLISHED' | 'RETIRED' | string | null
+  currency_code: string | null
+  max_fine_per_student: number | null
+  rules: FineTemplateRule[]
+}
+
+export type FineTemplate = {
+  template_id: number
+  template_code: string
+  template_name: string
+  description: string | null
+  is_active: boolean
+  active_version: FineTemplateVersion | null
 }
