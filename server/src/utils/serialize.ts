@@ -93,6 +93,11 @@ export function windowToApi(row: {
   session_label: string;
   start_time: string;
   end_time: string;
+  late_after?: string | null;
+  in_end?: string | null;
+  out_start?: string | null;
+  out_end?: string | null;
+  requires_checkout?: boolean;
   sort_order: number;
 }): Record<string, unknown> {
   return {
@@ -101,6 +106,11 @@ export function windowToApi(row: {
     session_label: row.session_label,
     start_time: row.start_time,
     end_time: row.end_time,
+    late_after: row.late_after ?? null,
+    in_end: row.in_end ?? null,
+    out_start: row.out_start ?? null,
+    out_end: row.out_end ?? null,
+    requires_checkout: row.requires_checkout ?? false,
     sort_order: row.sort_order,
   };
 }

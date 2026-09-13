@@ -12,6 +12,7 @@ import { AdminDashboard } from './pages/admin/Dashboard'
 import { AdminEvents } from './pages/admin/Events'
 import { AdminFineTemplates } from './pages/admin/FineTemplates'
 import { AdminModerators } from './pages/admin/Moderators'
+import { AdminSections } from './pages/admin/Sections'
 import { AdminStudents } from './pages/admin/Students'
 import { LoginPage } from './pages/Login'
 import { ModeratorDashboard } from './pages/moderator/Dashboard'
@@ -62,7 +63,9 @@ export default function App() {
           <Route path="/superadmin" element={<AdminLayout />}>
             <Route index element={<AdminDashboard />} />
             <Route path="events" element={<AdminEvents />} />
+            <Route path="events/:eventId/attendance" element={<AdminAttendance />} />
             <Route path="fines" element={<AdminFineTemplates />} />
+            <Route path="sections" element={<AdminSections />} />
             <Route path="students" element={<AdminStudents />} />
             <Route path="moderators" element={<AdminModerators />} />
             <Route path="attendance" element={<AdminAttendance />} />

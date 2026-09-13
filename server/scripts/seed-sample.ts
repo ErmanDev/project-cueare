@@ -121,17 +121,24 @@ async function ensureSection(
   const key = `${args.termId}:${args.programId}:${args.yearLevel}:${code}`;
   const hit = cache.get(key);
   if (hit) return hit;
-  const row = await one<{ section_id: number }>(
+  let row = await one<{ section_id: number }>(
     db,
-    `INSERT INTO ${q('Sections')} (
-        ${q('academicTermId')}, ${q('academicProgramId')}, ${q('yearLevel')},
-        ${q('sectionCode')}, ${q('sectionName')}
-     ) VALUES ($1, $2, $3, $4, $5)
-     ON CONFLICT (${q('academicTermId')}, ${q('academicProgramId')}, ${q('yearLevel')}, ${q('sectionCode')})
-     DO UPDATE SET ${q('sectionName')} = EXCLUDED.${q('sectionName')}
-     RETURNING ${q('sectionId')} AS section_id`,
-    [args.termId, args.programId, args.yearLevel, code, code],
+    `SELECT ${q('sectionId')} AS section_id FROM ${q('Sections')}
+     WHERE ${q('academicTermId')} = $1 AND ${q('academicProgramId')} = $2
+       AND ${q('yearLevel')} = $3 AND ${q('sectionCode')} = $4`,
+    [args.termId, args.programId, args.yearLevel, code],
   );
+  if (!row) {
+    row = await one<{ section_id: number }>(
+      db,
+      `INSERT INTO ${q('Sections')} (
+          ${q('academicTermId')}, ${q('academicProgramId')}, ${q('yearLevel')},
+          ${q('sectionCode')}, ${q('sectionName')}
+       ) VALUES ($1, $2, $3, $4, $5)
+       RETURNING ${q('sectionId')} AS section_id`,
+      [args.termId, args.programId, args.yearLevel, code, code],
+    );
+  }
   cache.set(key, row!.section_id);
   return row!.section_id;
 }

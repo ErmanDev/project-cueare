@@ -22,6 +22,37 @@ export type Student = {
   qr_payload?: string | null
 }
 
+export type EventParticipant = {
+  student_id: number
+  student_id_code: string | null
+  first_name: string
+  middle_name: string | null
+  last_name: string
+  course: string | null
+  year_level: number | null
+  section: string | null
+  added_at: string
+}
+
+export type EventParticipantToken = {
+  token_id: number
+  event_id: number
+  student_id: number
+  token: string
+  is_revoked: boolean
+  issued_by_user_id: number
+  issued_at_utc: string
+  revoked_at_utc: string | null
+  revoked_by_user_id: number | null
+  student_id_code: string | null
+  first_name: string
+  last_name: string
+  middle_name: string | null
+  course: string | null
+  year_level: number | null
+  section: string | null
+}
+
 export type StudentPage = {
   students: Student[]
   total: number
@@ -35,6 +66,11 @@ export type SessionWindow = {
   session_label: string
   start_time: string
   end_time: string
+  late_after?: string | null
+  in_end?: string | null
+  out_start?: string | null
+  out_end?: string | null
+  requires_checkout?: boolean
   sort_order: number
 }
 
@@ -58,6 +94,7 @@ export type Event = {
   is_today?: boolean
   current_session_window_id?: number | null
   fine_policy?: EventFineSummary | null
+  participant_count?: number
 }
 
 export type AttendanceLog = {
@@ -121,6 +158,10 @@ export type WindowDraft = {
   label: string
   start: string
   end: string
+  late_after?: string
+  in_end?: string
+  out_start?: string
+  out_end?: string
 }
 
 export type FineTemplateRule = {
@@ -148,3 +189,37 @@ export type FineTemplate = {
   is_active: boolean
   active_version: FineTemplateVersion | null
 }
+
+export type Section = {
+  section_id: number
+  section_code: string
+  section_name: string | null
+  year_level: number
+  academic_term_id: number
+  term_code: string
+  term_name: string
+  academic_year_id?: number
+  year_code?: string
+  year_name?: string
+  academic_program_id: number
+  program_code: string
+  program_name: string
+  enrolled_student_count: number
+}
+
+export type SectionStudent = {
+  student_id: number
+  student_number: string
+  first_name: string
+  middle_name: string | null
+  last_name: string
+  suffix: string | null
+  student_enrollment_id: number
+  enrollment_status_code: string
+  effective_from_utc: string
+}
+
+export type SectionBreakdown = Section & {
+  students: SectionStudent[]
+}
+

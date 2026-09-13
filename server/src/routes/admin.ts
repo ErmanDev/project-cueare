@@ -23,7 +23,7 @@ import {
   requireString,
 } from '../utils/http.ts';
 import { parseIsoDateTime } from '../utils/time.ts';
-import { isValidTime, normaliseTime } from '../utils/time.ts';
+import { isValidTime, normaliseTime, overlaps, parseMinutes } from '../utils/time.ts';
 import { isValidStudentCode, requireValidStudentCode } from '../utils/studentCode.ts';
 import {
   attendanceDetailToApi,
@@ -236,6 +236,29 @@ adminRouter.delete(
   }),
 );
 
+// --- sections ---
+
+adminRouter.get(
+  '/sections',
+  asyncHandler(async (req, res) => {
+    const termId = queryInt(req, 'term_id') ?? undefined;
+    const programId = queryInt(req, 'program_id') ?? undefined;
+    const search = queryString(req, 'q') ?? undefined;
+    const sections = await q.listSections(getPool(), { termId, programId, search });
+    res.json(sections);
+  }),
+);
+
+adminRouter.get(
+  '/sections/:id',
+  asyncHandler(async (req, res) => {
+    const id = parsePathId(req.params.id);
+    const breakdown = await q.getSectionStudentBreakdown(getPool(), id);
+    if (!breakdown) throw notFound('Section not found');
+    res.json(breakdown);
+  }),
+);
+
 // --- events ---
 
 adminRouter.get(
@@ -249,16 +272,143 @@ adminRouter.get(
       getPool(),
       events.map((e) => e.id),
     );
+    const participantCounts = await q.listEventParticipantCounts(
+      getPool(),
+      events.map((e) => e.id),
+    );
     const now = svc.now();
     res.json(
       events.map((e) => ({
         ...eventToApi(e, now),
         session_windows: windows.filter((w) => w.event_id === e.id).map(windowToApi),
         fine_policy: policies.get(e.id) ?? null,
+        participant_count: participantCounts.get(e.id) ?? 0,
       })),
     );
   }),
 );
+
+adminRouter.post(
+  '/events/:id/participants/sync',
+  asyncHandler(async (req, res) => {
+    const id = parsePathId(req.params.id);
+    const existing = await q.getEventById(getPool(), id);
+    if (!existing) throw notFound('Event not found');
+    await q.ensureEventRoster(getPool(), id, req.auth!.id);
+    // Auto-generate QR tokens for all synced participants
+    await q.upsertEventParticipantTokens(getPool(), id, req.auth!.id);
+    const count = await q.countEventParticipants(getPool(), id);
+    res.json({
+      event_id: id,
+      participant_count: count,
+      synced_at: new Date().toISOString(),
+    });
+  }),
+);
+
+adminRouter.get(
+  '/events/:id/participants',
+  asyncHandler(async (req, res) => {
+    const id = parsePathId(req.params.id);
+    const existing = await q.getEventById(getPool(), id);
+    if (!existing) throw notFound('Event not found');
+    const qParam = req.query.q ? String(req.query.q) : undefined;
+    const page = req.query.page ? Number(req.query.page) : 1;
+    const limit = req.query.limit ? Number(req.query.limit) : 50;
+    const result = await q.listEventParticipants(getPool(), id, { q: qParam, page, limit });
+    res.json(result);
+  }),
+);
+
+adminRouter.post(
+  '/events/:id/participants',
+  asyncHandler(async (req, res) => {
+    const id = parsePathId(req.params.id);
+    const existing = await q.getEventById(getPool(), id);
+    if (!existing) throw notFound('Event not found');
+    const body = jsonObject(req);
+    const studentIds = Array.isArray(body.student_ids) ? body.student_ids.map(Number).filter(Boolean) : [];
+    const sectionId = optionalInt(body, 'section_id');
+
+    let addedCount = 0;
+    if (sectionId) {
+      addedCount += await q.addSectionToEvent(getPool(), id, sectionId, req.auth!.id);
+    }
+    if (studentIds.length > 0) {
+      addedCount += await q.addParticipantsToEvent(getPool(), id, studentIds, req.auth!.id);
+    }
+
+    // Auto-generate QR tokens for all (new) participants — idempotent, existing tokens untouched
+    await q.upsertEventParticipantTokens(getPool(), id, req.auth!.id);
+
+    const total = await q.countEventParticipants(getPool(), id);
+    res.json({
+      event_id: id,
+      added_count: addedCount,
+      total_participants: total,
+    });
+  }),
+);
+
+adminRouter.delete(
+  '/events/:id/participants/:studentId',
+  asyncHandler(async (req, res) => {
+    const id = parsePathId(req.params.id);
+    const studentId = parsePathId(req.params.studentId);
+    await q.removeEventParticipant(getPool(), id, studentId);
+    res.status(204).end();
+  }),
+);
+
+// ── QR Tokens ────────────────────────────────────────────────────────────────
+
+/** POST /events/:id/tokens — generate tokens for all participants (idempotent) */
+adminRouter.post(
+  '/events/:id/tokens',
+  asyncHandler(async (req, res) => {
+    const id = parsePathId(req.params.id);
+    const existing = await q.getEventById(getPool(), id);
+    if (!existing) throw notFound('Event not found');
+    const created = await q.upsertEventParticipantTokens(getPool(), id, req.auth!.id);
+    const tokens = await q.listEventParticipantTokens(getPool(), id);
+    res.json({ event_id: id, created, tokens });
+  }),
+);
+
+/** GET /events/:id/tokens — list all tokens for the event */
+adminRouter.get(
+  '/events/:id/tokens',
+  asyncHandler(async (req, res) => {
+    const id = parsePathId(req.params.id);
+    const existing = await q.getEventById(getPool(), id);
+    if (!existing) throw notFound('Event not found');
+    const tokens = await q.listEventParticipantTokens(getPool(), id);
+    res.json({ event_id: id, tokens });
+  }),
+);
+
+/** POST /events/:id/tokens/:tokenId/revoke — revoke a specific token */
+adminRouter.post(
+  '/events/:id/tokens/:tokenId/revoke',
+  asyncHandler(async (req, res) => {
+    const tokenId = parsePathId(req.params.tokenId);
+    const ok = await q.revokeEventParticipantToken(getPool(), tokenId, req.auth!.id);
+    if (!ok) throw notFound('Token not found or already revoked');
+    res.json({ token_id: tokenId, is_revoked: true });
+  }),
+);
+
+/** POST /events/:id/tokens/:tokenId/reissue — regenerate a revoked token */
+adminRouter.post(
+  '/events/:id/tokens/:tokenId/reissue',
+  asyncHandler(async (req, res) => {
+    const tokenId = parsePathId(req.params.tokenId);
+    const newToken = await q.reissueEventParticipantToken(getPool(), tokenId, req.auth!.id);
+    if (!newToken) throw notFound('Token not found');
+    res.json({ token_id: tokenId, token: newToken, is_revoked: false });
+  }),
+);
+
 
 adminRouter.post(
   '/events',
@@ -289,6 +439,10 @@ adminRouter.post(
           const label = requireString(w, 'session_label');
           const start = normaliseTime(requireString(w, 'start_time'));
           const end = normaliseTime(requireString(w, 'end_time'));
+          const lateAfter = optionalString(w, 'late_after');
+          const inEnd = optionalString(w, 'in_end');
+          const outStart = optionalString(w, 'out_start');
+          const outEnd = optionalString(w, 'out_end');
           await svc.validateWindow({
             eventId: event.id,
             startTime: start,
@@ -300,6 +454,10 @@ adminRouter.post(
             sessionLabel: label,
             startTime: start,
             endTime: end,
+            lateAfter: lateAfter ? normaliseTime(lateAfter) : null,
+            inEnd: inEnd ? normaliseTime(inEnd) : null,
+            outStart: outStart ? normaliseTime(outStart) : null,
+            outEnd: outEnd ? normaliseTime(outEnd) : null,
             sortOrder: optionalInt(w, 'sort_order') ?? order++,
           });
         }
@@ -355,11 +513,19 @@ adminRouter.post(
       const existing = await svc.windowsForEvent(eventId);
       sortOrder = existing.length === 0 ? 0 : Math.max(...existing.map((w) => w.sort_order)) + 1;
     }
+    const lateAfter = optionalString(body, 'late_after');
+    const inEnd = optionalString(body, 'in_end');
+    const outStart = optionalString(body, 'out_start');
+    const outEnd = optionalString(body, 'out_end');
     const created = await q.insertWindow(getPool(), {
       eventId,
       sessionLabel: label,
       startTime: start,
       endTime: end,
+      lateAfter: lateAfter ? normaliseTime(lateAfter) : null,
+      inEnd: inEnd ? normaliseTime(inEnd) : null,
+      outStart: outStart ? normaliseTime(outStart) : null,
+      outEnd: outEnd ? normaliseTime(outEnd) : null,
       sortOrder,
     });
     svc.invalidateEvent(eventId);
@@ -388,6 +554,113 @@ adminRouter.get(
   }),
 );
 
+async function syncSessionWindowsForEvent(
+  db: Queryable,
+  eventId: number,
+  rawWindows: unknown[],
+  svc: AdminService,
+): Promise<void> {
+  const existing = await q.windowsForEvent(db, eventId);
+  const existingMap = new Map(existing.map((w) => [w.id, w]));
+
+  const drafts: Array<{
+    id?: number;
+    label: string;
+    start: string;
+    end: string;
+    startMins: number;
+    endMins: number;
+    lateAfter?: string | null;
+    inEnd?: string | null;
+    outStart?: string | null;
+    outEnd?: string | null;
+    sortOrder: number;
+  }> = [];
+
+  let order = 0;
+  for (const raw of rawWindows) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+    const w = raw as Record<string, unknown>;
+    const windowId = optionalInt(w, 'id') ?? optionalInt(w, 'event_session_id');
+    const label = requireString(w, 'session_label');
+    const start = normaliseTime(requireString(w, 'start_time'));
+    const end = normaliseTime(requireString(w, 'end_time'));
+    const startMins = parseMinutes(start);
+    const endMins = parseMinutes(end);
+    if (startMins == null || endMins == null) throw badRequest('start_time and end_time must be "HH:mm"');
+    if (startMins >= endMins) throw badRequest(`"${label}": start_time must be before end_time`);
+
+    drafts.push({
+      id: windowId && existingMap.has(windowId) ? windowId : undefined,
+      label,
+      start,
+      end,
+      startMins,
+      endMins,
+      lateAfter: optionalString(w, 'late_after'),
+      inEnd: optionalString(w, 'in_end'),
+      outStart: optionalString(w, 'out_start'),
+      outEnd: optionalString(w, 'out_end'),
+      sortOrder: optionalInt(w, 'sort_order') ?? order++,
+    });
+  }
+
+  for (let i = 0; i < drafts.length; i++) {
+    for (let j = i + 1; j < drafts.length; j++) {
+      const a = drafts[i]!;
+      const b = drafts[j]!;
+      if (overlaps(a.startMins, a.endMins, b.startMins, b.endMins)) {
+        throw conflict(`"${a.label}" (${a.start}–${a.end}) overlaps "${b.label}" (${b.start}–${b.end})`, {
+          code: 'WINDOW_OVERLAP',
+        });
+      }
+    }
+  }
+
+  const processedIds = new Set<number>();
+  for (const d of drafts) {
+    if (d.id) {
+      await q.updateWindow(db, d.id, {
+        sessionLabel: d.label,
+        startTime: d.start,
+        endTime: d.end,
+        lateAfter: d.lateAfter !== undefined ? (d.lateAfter ? normaliseTime(d.lateAfter) : null) : undefined,
+        inEnd: d.inEnd !== undefined ? (d.inEnd ? normaliseTime(d.inEnd) : null) : undefined,
+        outStart: d.outStart !== undefined ? (d.outStart ? normaliseTime(d.outStart) : null) : undefined,
+        outEnd: d.outEnd !== undefined ? (d.outEnd ? normaliseTime(d.outEnd) : null) : undefined,
+        sortOrder: d.sortOrder,
+      });
+      processedIds.add(d.id);
+    } else {
+      const created = await q.insertWindow(db, {
+        eventId,
+        sessionLabel: d.label,
+        startTime: d.start,
+        endTime: d.end,
+        lateAfter: d.lateAfter ? normaliseTime(d.lateAfter) : null,
+        inEnd: d.inEnd ? normaliseTime(d.inEnd) : null,
+        outStart: d.outStart ? normaliseTime(d.outStart) : null,
+        outEnd: d.outEnd ? normaliseTime(d.outEnd) : null,
+        sortOrder: d.sortOrder,
+      });
+      processedIds.add(created.id);
+    }
+  }
+
+  for (const oldW of existing) {
+    if (!processedIds.has(oldW.id)) {
+      const count = await q.countAttendanceForWindow(db, oldW.id);
+      if (count > 0) {
+        throw conflict(
+          `Cannot delete session "${oldW.session_label}" because it contains ${count} attendance scan record(s).`,
+          { code: 'HAS_RECORDS', count },
+        );
+      }
+      await q.deleteWindow(db, oldW.id);
+    }
+  }
+}
+
 adminRouter.put(
   '/events/:id',
   asyncHandler(async (req, res) => {
@@ -410,6 +683,9 @@ adminRouter.put(
         eventDate: date ?? undefined,
         isActive: isActive ?? undefined,
       });
+      if (hasKey(body, 'session_windows') && Array.isArray(body.session_windows)) {
+        await syncSessionWindowsForEvent(client, id, body.session_windows as unknown[], svc);
+      }
       if (fineTemplateId) {
         await applyEventFineTemplate(client, id, fineTemplateId, req.auth!.id, event.name);
       }
@@ -477,10 +753,18 @@ adminRouter.put(
       endTime: end,
       excludeId: id,
     });
+    const lateAfter = optionalString(body, 'late_after');
+    const inEnd = optionalString(body, 'in_end');
+    const outStart = optionalString(body, 'out_start');
+    const outEnd = optionalString(body, 'out_end');
     const updated = await q.updateWindow(getPool(), id, {
       sessionLabel: label ?? undefined,
       startTime: start,
       endTime: end,
+      lateAfter: lateAfter !== undefined ? (lateAfter ? normaliseTime(lateAfter) : null) : undefined,
+      inEnd: inEnd !== undefined ? (inEnd ? normaliseTime(inEnd) : null) : undefined,
+      outStart: outStart !== undefined ? (outStart ? normaliseTime(outStart) : null) : undefined,
+      outEnd: outEnd !== undefined ? (outEnd ? normaliseTime(outEnd) : null) : undefined,
       sortOrder: sortOrder ?? undefined,
     });
     service(req).invalidateEvent(existing.event_id);

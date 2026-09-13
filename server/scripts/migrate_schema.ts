@@ -98,17 +98,18 @@ async function run() {
       JOIN pg_namespace n ON t.relnamespace = n.oid
       WHERE n.nspname = 'ssc' AND t.relname = 'EventParticipants'
     `);
-    if (!partConRes.rows.some(r => r.conname === 'uq_event_participants_session_context')) {
-      console.log('Adding uq_event_participants_session_context...');
-      await client.query(`ALTER TABLE ssc."EventParticipants" ADD CONSTRAINT uq_event_participants_session_context UNIQUE ("eventParticipantId", "eventSessionId")`);
-    }
+    // Check Sections constraints
+    console.log('Aligning Sections constraints...');
+    await client.query(`ALTER TABLE ssc."Sections" DROP CONSTRAINT IF EXISTS uq_sections_code CASCADE`);
+    await client.query(`ALTER TABLE ssc."Sections" DROP CONSTRAINT IF EXISTS uq_sections_term_program_year_code CASCADE`);
+    await client.query(`ALTER TABLE ssc."Sections" ADD CONSTRAINT uq_sections_term_program_year_code UNIQUE ("academicTermId", "academicProgramId", "yearLevel", "sectionCode")`);
 
     console.log('\n--- Step 2: Executing complete schema script ---');
     const sqlPath = path.resolve('scripts/SSC_Attendance_Schema_PostgreSQL.sql');
     const sql = fs.readFileSync(sqlPath, 'utf-8');
 
     await client.query(sql);
-    console.log('\n>>> SUCCESS! All 29 tables, views, triggers, and stored procedures are live! <<<');
+    console.log('\n>>> SUCCESS! All 30 tables, views, triggers, and stored procedures are live! <<<');
   } catch (err: any) {
     console.error('\nError applying schema:', err.message);
     if (err.detail) console.error('Detail:', err.detail);

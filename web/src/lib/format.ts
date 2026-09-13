@@ -82,6 +82,12 @@ export function minutes(hhmm: string): number {
   return Number(h) * 60 + Number(m)
 }
 
+export function hhmmFromMinutes(mins: number): string {
+  const h = String(Math.floor(mins / 60)).padStart(2, '0')
+  const m = String(mins % 60).padStart(2, '0')
+  return `${h}:${m}`
+}
+
 export function initial(name: string): string {
   return name.trim() ? name.trim()[0]!.toUpperCase() : '?'
 }

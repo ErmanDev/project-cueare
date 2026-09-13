@@ -15,6 +15,7 @@
     "seed-sample": "bun scripts/seed-sample.ts",
     "seed-fine-templates": "bun scripts/seed-fine-templates.ts",
     "seed-acquaintance-event": "bun scripts/seed-acquaintance-event.ts",
+    "seed-event-fine-rules": "bun scripts/seed-event-fine-rules.ts",
     "test": "bun test --timeout 30000",
     "test:watch": "bun test --watch --timeout 30000"
   },

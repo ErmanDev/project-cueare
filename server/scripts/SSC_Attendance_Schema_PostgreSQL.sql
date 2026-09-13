@@ -245,6 +245,28 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_event_participant_qr_credentials_active
     ON "EventParticipantQrCredentials"("eventRegistrationId")
     WHERE "revokedAtUtc" IS NULL;
 
+-- Per-event UUID QR token store (Approach B — one token per student per event, revokable)
+CREATE TABLE IF NOT EXISTS "EventParticipantTokens" (
+    "tokenId" BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    "eventId" BIGINT NOT NULL REFERENCES "Events"("eventId") ON DELETE CASCADE,
+    "studentId" BIGINT NOT NULL REFERENCES "Students"("studentId") ON DELETE CASCADE,
+    "token" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "isRevoked" BOOLEAN NOT NULL DEFAULT FALSE,
+    "issuedByUserId" INT NOT NULL REFERENCES "Users"("userId"),
+    "issuedAtUtc" TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    "revokedAtUtc" TIMESTAMPTZ NULL,
+    "revokedByUserId" INT NULL REFERENCES "Users"("userId"),
+    CONSTRAINT uq_event_participant_tokens_event_student UNIQUE ("eventId", "studentId"),
+    CONSTRAINT uq_event_participant_tokens_token UNIQUE ("token"),
+    CONSTRAINT ck_event_participant_tokens_revoke CHECK (
+        ("isRevoked" = FALSE AND "revokedAtUtc" IS NULL AND "revokedByUserId" IS NULL)
+        OR ("isRevoked" = TRUE AND "revokedAtUtc" IS NOT NULL AND "revokedByUserId" IS NOT NULL)
+    )
+);
+
+CREATE INDEX IF NOT EXISTS ix_event_participant_tokens_event
+    ON "EventParticipantTokens"("eventId", "studentId");
+
 -- ----------------------------------------------------------------------------
 -- 4. ATTENDANCE SCANNING & AUDIT LOGS
 -- ----------------------------------------------------------------------------

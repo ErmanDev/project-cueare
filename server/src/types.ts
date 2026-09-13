@@ -76,6 +76,11 @@ export type SessionWindowRow = {
   session_label: string;
   start_time: string;
   end_time: string;
+  late_after?: string | null;
+  in_end?: string | null;
+  out_start?: string | null;
+  out_end?: string | null;
+  requires_checkout?: boolean;
   sort_order: number;
 };
 

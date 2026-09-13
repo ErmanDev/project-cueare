@@ -144,7 +144,7 @@ CREATE TABLE IF NOT EXISTS "Sections" (
       "createdAtUtc" timestamptz(3) NOT NULL DEFAULT clock_timestamp(),
       "rowVersion" bytea NOT NULL DEFAULT new_row_version(),
       CONSTRAINT uq_sections_context UNIQUE ("academicTermId", "academicProgramId", "yearLevel", "sectionId"),
-      CONSTRAINT uq_sections_code UNIQUE ("academicTermId", "academicProgramId", "sectionCode"),
+      CONSTRAINT uq_sections_code UNIQUE ("academicTermId", "academicProgramId", "yearLevel", "sectionCode"),
       CONSTRAINT fk_sections_term FOREIGN KEY ("academicTermId")
         REFERENCES "AcademicTerms" ("academicTermId"),
       CONSTRAINT fk_sections_program FOREIGN KEY ("academicProgramId")
