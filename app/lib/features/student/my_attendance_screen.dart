@@ -17,7 +17,10 @@ class MyAttendanceScreen extends ConsumerWidget {
     final logs = ref.watch(myAttendanceProvider(studentIdCode));
 
     return RefreshIndicator(
-      onRefresh: () => ref.refresh(myAttendanceProvider(studentIdCode).future),
+      onRefresh: () async {
+        ref.invalidate(myAttendanceProvider(studentIdCode));
+        await ref.read(myAttendanceProvider(studentIdCode).future);
+      },
       child: AsyncValueWidget(
         value: logs,
         onRetry: () => ref.invalidate(myAttendanceProvider(studentIdCode)),

@@ -15,6 +15,7 @@ class ScanPreviewModel {
     required this.canConfirm,
     required this.serverTime,
     required this.existingScans,
+    this.isLate = false,
     this.message,
   });
 
@@ -31,6 +32,7 @@ class ScanPreviewModel {
 
   /// 'IN' | 'OUT' | 'ALREADY_COMPLETE'
   final String computedDirection;
+  final bool isLate;
   final bool canConfirm;
   final DateTime serverTime;
   final List<({String direction, DateTime scannedAt})> existingScans;
@@ -52,6 +54,7 @@ class ScanPreviewModel {
       sessionEnd: session['end_time'] as String? ?? '',
       sessionMode: session['mode'] as String? ?? 'auto',
       computedDirection: json['computed_direction'] as String,
+      isLate: json['is_late'] as bool? ?? false,
       canConfirm: json['can_confirm'] as bool? ?? true,
       serverTime:
           DateTime.tryParse(json['server_time'] as String? ?? '') ??

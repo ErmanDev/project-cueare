@@ -350,7 +350,7 @@ export function EventRosterModal({
                           {p.sessions?.map((session) => (
                             <div key={session.session_id} style={{ fontSize: '0.75rem' }}>
                               <strong>{session.session_date} {session.session_name}</strong>{' '}
-                              <span className={`chip ${session.status === 'ABSENT' ? 'chip-inactive' : session.status === 'PENDING' ? 'chip-window' : 'chip-active'}`}>
+                              <span className={`chip ${session.status === 'ABSENT' ? 'chip-inactive' : session.status === 'PENDING' ? 'chip-window' : session.status === 'LATE' ? 'chip-late' : 'chip-active'}`}>
                                 {session.status}
                               </span>
                               {session.checked_in_at_utc ? (

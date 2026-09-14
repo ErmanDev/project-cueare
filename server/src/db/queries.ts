@@ -355,6 +355,23 @@ export async function getUserByUsername(db: Queryable, username: string): Promis
   );
 }
 
+/** Staff username or student ID already used for login, ignoring `exceptUserId`. */
+export async function existingLoginKind(
+  db: Queryable,
+  loginId: string,
+  exceptUserId?: number,
+): Promise<'user' | 'student' | null> {
+  const user = await getUserByUsername(db, loginId);
+  if (user && user.id !== exceptUserId) return 'user';
+  const student = await one<{ ok: number }>(
+    db,
+    `SELECT 1 AS ok FROM ${q('Students')} s
+     WHERE LOWER(s.${q('studentNumber')}) = LOWER($1)`,
+    [loginId],
+  );
+  return student ? 'student' : null;
+}
+
 export async function getUserByUsernameExact(
   db: Queryable,
   username: string,

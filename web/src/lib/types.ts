@@ -198,6 +198,7 @@ export type ScanPreview = {
     mode: 'auto' | 'manual'
   }
   computed_direction: 'IN' | 'OUT' | 'ALREADY_COMPLETE'
+  is_late?: boolean
   can_confirm: boolean
   server_time: string
   existing_scans: { direction: string; scanned_at: string }[]

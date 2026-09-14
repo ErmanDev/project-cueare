@@ -30,10 +30,16 @@ class ScanResultSheet extends StatelessWidget {
     final blocked = !preview.canConfirm;
     final color = blocked
         ? AppTheme.blockedColor
+        : preview.isLate
+        ? AppTheme.lateColor
         : preview.isIn
         ? AppTheme.inColor
         : AppTheme.outColor;
-    final directionLabel = blocked ? 'DONE' : preview.computedDirection;
+    final directionLabel = blocked
+        ? 'DONE'
+        : preview.isLate
+        ? '${preview.computedDirection} (LATE)'
+        : preview.computedDirection;
 
     return SafeArea(
       child: Padding(
@@ -105,9 +111,12 @@ class ScanResultSheet extends StatelessWidget {
                     blocked
                         ? (preview.message ??
                               'Already timed IN & OUT for ${preview.sessionLabel}')
-                        : '${preview.sessionMode == 'manual' ? 'Manual session' : 'Auto session'} '
-                              '· ${Fmt.hhmmRange(preview.sessionStart, preview.sessionEnd)} '
-                              '· server ${Fmt.time(preview.serverTime)}',
+                        : [
+                            if (preview.message != null) preview.message!,
+                            '${preview.sessionMode == 'manual' ? 'Manual session' : 'Auto session'} '
+                                '· ${Fmt.hhmmRange(preview.sessionStart, preview.sessionEnd)} '
+                                '· server ${Fmt.time(preview.serverTime)}',
+                          ].join('\n'),
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: scheme.onSurfaceVariant,

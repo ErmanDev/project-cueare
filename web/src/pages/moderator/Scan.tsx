@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { Html5Qrcode } from 'html5-qrcode'
 import { Keyboard, QrCode } from 'lucide-react'
 
 import { Button, Modal } from '../../components/ui'
 import { api } from '../../lib/api'
+import { cameraBlockedReason, explainCameraFailure, pickCameraId } from '../../lib/camera'
 import { fmtRange, fmtTime, initial } from '../../lib/format'
 import { useModerator } from '../../lib/moderator'
 import { useToast } from '../../lib/toast'
@@ -55,7 +56,9 @@ export function ModeratorScan() {
         device_note: 'web',
       })
       setConfirmed((n) => n + 1)
-      toast(`${preview.student.full_name} — ${preview.computed_direction}`)
+      toast(
+        `${preview.student.full_name} — ${preview.computed_direction}${preview.is_late ? ' (late)' : ''}`,
+      )
       setPreview(null)
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Confirm failed', 'error')
@@ -118,9 +121,8 @@ export function ModeratorScan() {
             onError={setCameraError}
           />
           {cameraError ? (
-            <p className="muted" style={{ marginTop: 8 }}>
-              {cameraError} On LAN HTTP, browsers often block the camera — type the student code
-              instead.
+            <p className="error-text" style={{ marginTop: 8 }}>
+              {cameraError}
             </p>
           ) : (
             <p className="muted" style={{ marginTop: 8 }}>
@@ -180,8 +182,18 @@ function PreviewModal({
   onCancel: () => void
 }) {
   const blocked = !preview.can_confirm
-  const color = blocked ? 'var(--blocked)' : preview.computed_direction === 'IN' ? 'var(--in)' : 'var(--out)'
-  const label = blocked ? 'DONE' : preview.computed_direction
+  const color = blocked
+    ? 'var(--blocked)'
+    : preview.is_late
+      ? 'var(--late)'
+      : preview.computed_direction === 'IN'
+        ? 'var(--in)'
+        : 'var(--out)'
+  const label = blocked
+    ? 'DONE'
+    : preview.is_late
+      ? `${preview.computed_direction} (LATE)`
+      : preview.computed_direction
   const s = preview.student
 
   return (
@@ -201,7 +213,12 @@ function PreviewModal({
           {blocked
             ? preview.message ||
               `Already timed IN & OUT for ${preview.computed_session.session_label}`
-            : `${preview.computed_session.mode === 'manual' ? 'Manual session' : 'Auto session'} · ${fmtRange(preview.computed_session.start_time, preview.computed_session.end_time)} · server ${fmtTime(preview.server_time)}`}
+            : [
+                preview.message,
+                `${preview.computed_session.mode === 'manual' ? 'Manual session' : 'Auto session'} · ${fmtRange(preview.computed_session.start_time, preview.computed_session.end_time)} · server ${fmtTime(preview.server_time)}`,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
         </p>
       </div>
       {preview.existing_scans.length > 0 ? (
@@ -224,7 +241,7 @@ function PreviewModal({
               Cancel
             </Button>
             <Button onClick={onConfirm} disabled={busy}>
-              Confirm {preview.computed_direction}
+              Confirm {preview.is_late ? `${preview.computed_direction} (late)` : preview.computed_direction}
             </Button>
           </>
         )}
@@ -242,51 +259,121 @@ function QrReader({
   onCode: (code: string) => void
   onError: (message: string | null) => void
 }) {
+  const reactId = useId()
+  const hostId = `qr-reader-${reactId.replace(/:/g, '')}`
   const pausedRef = useRef(paused)
-  pausedRef.current = paused
   const onCodeRef = useRef(onCode)
-  onCodeRef.current = onCode
+  const onErrorRef = useRef(onError)
+  const scannerRef = useRef<Html5Qrcode | null>(null)
+  const [retry, setRetry] = useState(0)
+  const [needsGesture, setNeedsGesture] = useState(false)
 
   useEffect(() => {
-    const el = document.getElementById('qr-reader')
-    if (!el) return
+    pausedRef.current = paused
+    onCodeRef.current = onCode
+    onErrorRef.current = onError
+  }, [paused, onCode, onError])
+
+  useEffect(() => {
     let cancelled = false
-    let scanner: Html5Qrcode | undefined
-    void import('html5-qrcode').then(({ Html5Qrcode }) => {
+    let instance: Html5Qrcode | undefined
+
+    async function stop(scanner?: Html5Qrcode) {
+      if (!scanner) return
+      try {
+        if (scanner.isScanning) await scanner.stop()
+        scanner.clear()
+      } catch {
+        /* already stopped */
+      }
+    }
+
+    async function start() {
+      const blocked = cameraBlockedReason()
+      if (blocked) {
+        onErrorRef.current(blocked)
+        setNeedsGesture(false)
+        return
+      }
+      const { Html5Qrcode } = await import('html5-qrcode')
       if (cancelled) return
-      const instance = new Html5Qrcode('qr-reader')
-      scanner = instance
-      return instance
-        .start(
-          { facingMode: 'environment' },
-          { fps: 8, qrbox: { width: 240, height: 240 } },
-          (decoded) => {
-            if (!pausedRef.current) onCodeRef.current(decoded)
-          },
-          () => undefined,
-        )
-        .then(() => {
-          if (cancelled) {
-            return instance.stop().then(() => {
-              instance.clear()
-            })
+      const host = document.getElementById(hostId)
+      if (!host) return
+      host.replaceChildren()
+      instance = new Html5Qrcode(hostId, { verbose: false })
+      scannerRef.current = instance
+      const config = {
+        fps: 10,
+        qrbox: (width: number, height: number) => {
+          const size = Math.max(120, Math.floor(Math.min(width, height) * 0.72))
+          return { width: size, height: size }
+        },
+      }
+      const onDecoded = (decoded: string) => {
+        if (!pausedRef.current) onCodeRef.current(decoded)
+      }
+      const cameras = await Html5Qrcode.getCameras().catch(() => [])
+      if (cancelled) return
+      const cameraId = pickCameraId(cameras)
+      try {
+        if (cameraId) {
+          await instance.start(cameraId, config, onDecoded, () => undefined)
+        } else {
+          try {
+            await instance.start({ facingMode: 'environment' }, config, onDecoded, () => undefined)
+          } catch {
+            await instance.start({ facingMode: 'user' }, config, onDecoded, () => undefined)
           }
-          onError(null)
-        })
-        .catch((e: unknown) => {
-          if (!cancelled) onError(e instanceof Error ? e.message : 'Camera unavailable.')
-        })
-    })
+        }
+      } catch (e) {
+        if (cancelled) return
+        onErrorRef.current(explainCameraFailure(e))
+        setNeedsGesture(true)
+        await stop(instance)
+        scannerRef.current = null
+        return
+      }
+      if (cancelled) {
+        await stop(instance)
+        return
+      }
+      onErrorRef.current(null)
+      setNeedsGesture(false)
+    }
+
+    void start()
     return () => {
       cancelled = true
-      scanner
-        ?.stop()
-        .then(() => {
-          scanner?.clear()
-        })
-        .catch(() => undefined)
+      scannerRef.current = null
+      void stop(instance)
     }
-  }, [onError])
+  }, [hostId, retry])
 
-  return <div id="qr-reader" />
+  useEffect(() => {
+    const scanner = scannerRef.current
+    if (!scanner?.isScanning) return
+    try {
+      if (paused) scanner.pause(true)
+      else scanner.resume()
+    } catch {
+      /* not scanning yet */
+    }
+  }, [paused])
+
+  return (
+    <div>
+      <div id={hostId} className="qr-reader" />
+      {needsGesture ? (
+        <Button
+          style={{ marginTop: 10, width: '100%' }}
+          onClick={() => {
+            setNeedsGesture(false)
+            setRetry((n) => n + 1)
+          }}
+        >
+          Turn on camera
+        </Button>
+      ) : null}
+    </div>
+  )
 }

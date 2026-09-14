@@ -6,6 +6,7 @@ import '../../widgets/page_scaffold.dart';
 import '../auth/server_config_screen.dart';
 import 'my_attendance_screen.dart';
 import 'my_qr_screen.dart';
+import 'student_profile_screen.dart';
 
 /// Student view: [My QR] / [My attendance] tabs.
 class StudentHomeScreen extends ConsumerStatefulWidget {

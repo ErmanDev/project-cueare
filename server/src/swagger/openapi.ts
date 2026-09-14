@@ -167,6 +167,7 @@ export const openApiDocument = {
             type: 'string',
             enum: ['IN', 'OUT', 'ALREADY_COMPLETE'],
           },
+          is_late: { type: 'boolean' },
           can_confirm: { type: 'boolean' },
           server_time: { type: 'string', format: 'date-time' },
           existing_scans: {
@@ -1319,6 +1320,10 @@ export const openApiDocument = {
       post: {
         tags: ['Admin — Moderators'],
         summary: 'Create moderator',
+        description:
+          'Create a staff moderator with a special ID and password. ' +
+          'The ID must not already be a user or student login. ' +
+          'To reuse a student ID, POST `/admin/moderators/from-student` instead.',
         security: bearer,
         requestBody: {
           required: true,
@@ -1329,7 +1334,11 @@ export const openApiDocument = {
                 required: ['name', 'username', 'password'],
                 properties: {
                   name: { type: 'string' },
-                  username: { type: 'string' },
+                  username: {
+                    type: 'string',
+                    maxLength: 100,
+                    description: 'Special login ID. Must not match an existing user or student ID.',
+                  },
                   password: { type: 'string', minLength: 4 },
                 },
               },
@@ -1340,6 +1349,10 @@ export const openApiDocument = {
           '201': {
             description: 'Created',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/User' } } },
+          },
+          '409': {
+            description: 'ID already taken by a user, or belongs to a student',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
           },
         },
       },
@@ -1379,6 +1392,10 @@ export const openApiDocument = {
           '200': {
             description: 'Updated',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/User' } } },
+          },
+          '409': {
+            description: 'New ID already taken by a user, or belongs to a student',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
           },
         },
       },

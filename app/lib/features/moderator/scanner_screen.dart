@@ -170,8 +170,13 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
         ref.invalidate(myScansProvider);
         _flash(
           '${log.studentName ?? preview.student.fullName} · '
-          '${log.sessionLabel ?? preview.sessionLabel} ${log.direction} ✓',
-          log.direction == 'IN' ? AppTheme.inColor : AppTheme.outColor,
+          '${log.sessionLabel ?? preview.sessionLabel} ${log.direction}'
+          '${preview.isLate ? ' (late)' : ''} ✓',
+          preview.isLate
+              ? AppTheme.lateColor
+              : log.direction == 'IN'
+              ? AppTheme.inColor
+              : AppTheme.outColor,
         );
       } on ApiFailure catch (e) {
         if (e.code == 'DIRECTION_CHANGED' || e.code == 'ALREADY_COMPLETE') {

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import type { Pool } from 'pg';
 
-import { AttendanceService, computeDirection, pickWindowForTime } from '../src/attendance/service.ts';
+import { AttendanceService, computeDirection, pickWindowForTime, previewToApi } from '../src/attendance/service.ts';
 import { getConfig } from '../src/config.ts';
 import { createPool, ensureSchema } from '../src/db/pool.ts';
 import { backfillEventRegistrations } from '../src/db/schema.ts';
@@ -634,8 +634,94 @@ describe('AttendanceService', () => {
       );
     });
 
-    it('manual override still requires the session to be open', async () => {
+    it('manual override after check-in close still records a late IN', async () => {
       if (!dbReady) return;
+      fakeNow = new Date(2026, 8, 5, 18, 0);
+      const p = await service.preview({
+        eventId,
+        qrPayload: 'STU-2026-0001',
+        sessionWindowId: afternoonId,
+      });
+      expect(p.window.id).toBe(afternoonId);
+      expect(p.direction.direction).toBe(DIRECTION.in);
+      expect(p.direction.canScan).toBe(true);
+      expect(previewToApi(p).is_late).toBe(true);
+
+      await service.confirm({
+        eventId,
+        studentId,
+        sessionWindowId: afternoonId,
+        scannedBy: moderatorId,
+      });
+      const status = await pool.query(
+        'SELECT "attendanceStatusCode" FROM "AttendanceSessionStatus" WHERE "eventSessionId" = $1 AND "studentId" = $2',
+        [afternoonId, studentId],
+      );
+      expect(status.rows[0].attendanceStatusCode).toBe('LATE');
+    });
+
+    it('late IN after the late cutoff is allowed and marked LATE', async () => {
+      if (!dbReady) return;
+      await q.updateWindow(pool, morningId, {
+        startTime: '07:00',
+        endTime: '12:00',
+        lateAfter: '07:30',
+        inEnd: '08:30',
+      });
+      service.invalidateEvent(eventId);
+      fakeNow = new Date(2026, 8, 5, 10, 43);
+      const p = await service.preview({
+        eventId,
+        qrPayload: 'STU-2026-0001',
+        sessionWindowId: morningId,
+      });
+      expect(p.direction.direction).toBe(DIRECTION.in);
+      expect(previewToApi(p).is_late).toBe(true);
+      await service.confirm({
+        eventId,
+        studentId,
+        sessionWindowId: morningId,
+        scannedBy: moderatorId,
+      });
+      const status = await pool.query(
+        'SELECT "attendanceStatusCode" FROM "AttendanceSessionStatus" WHERE "eventSessionId" = $1 AND "studentId" = $2',
+        [morningId, studentId],
+      );
+      expect(status.rows[0].attendanceStatusCode).toBe('LATE');
+    });
+
+    it('IN before the late cutoff is PRESENT', async () => {
+      if (!dbReady) return;
+      await q.updateWindow(pool, morningId, {
+        startTime: '07:00',
+        endTime: '12:00',
+        lateAfter: '08:45',
+        inEnd: '09:00',
+      });
+      service.invalidateEvent(eventId);
+      fakeNow = new Date(2026, 8, 5, 8, 30);
+      await service.confirm({
+        eventId,
+        studentId,
+        sessionWindowId: morningId,
+        scannedBy: moderatorId,
+      });
+      const status = await pool.query(
+        'SELECT "attendanceStatusCode" FROM "AttendanceSessionStatus" WHERE "eventSessionId" = $1 AND "studentId" = $2',
+        [morningId, studentId],
+      );
+      expect(status.rows[0].attendanceStatusCode).toBe('PRESENT');
+    });
+
+    it('checkout after its window still requires the session to be open', async () => {
+      if (!dbReady) return;
+      fakeNow = new Date(2026, 8, 5, 14, 0);
+      await service.confirm({
+        eventId,
+        studentId,
+        sessionWindowId: afternoonId,
+        scannedBy: moderatorId,
+      });
       fakeNow = new Date(2026, 8, 5, 18, 0);
       await expectRejected(
         service.preview({

@@ -344,6 +344,16 @@ export function BootSkeleton() {
   return (
     <div className="app-shell" role="status" aria-busy="true" aria-live="polite">
       <span className="visually-hidden">Loading</span>
+      <header className="shell-bar">
+        <div className="icon-btn shell-menu" aria-hidden="true">
+          <Bone width={22} height={22} radius={6} />
+        </div>
+        <div className="shell-bar-brand">
+          <Logo size={32} className="sidebar-logo shell-bar-logo" />
+          <Bone width={110} height={14} />
+        </div>
+        <Bone width={44} height={44} radius={10} />
+      </header>
       <aside className="sidebar">
         <div className="sidebar-brand">
           <Logo size={40} className="sidebar-logo" />

@@ -219,14 +219,17 @@ export class AttendanceService {
       );
     }
     const isOut = args.direction === DIRECTION.out;
-    const closes = parseMinutes(isOut ? args.window.out_end ?? args.window.end_time : args.window.in_end ?? args.window.end_time) ?? end;
-    const opens = isOut ? parseMinutes(args.window.out_start ?? args.window.start_time) ?? start : start;
+    if (!isOut) return;
+    const closes =
+      parseMinutes(args.window.out_end ?? args.window.end_time) ?? end;
+    const opens =
+      parseMinutes(args.window.out_start ?? args.window.start_time) ?? start;
     if (minutes < opens) {
       throw conflict(`Check-out for "${args.window.session_label}" has not opened yet`);
     }
     if (minutes >= closes) {
       throw conflict(
-        `${isOut ? 'Check-out' : 'Check-in'} for "${args.window.session_label}" has closed`,
+        `Check-out for "${args.window.session_label}" has closed`,
         {
           code: 'SESSION_ENDED',
           session_label: args.window.session_label,
@@ -498,6 +501,13 @@ export class AttendanceService {
   }
 }
 
+/** Check-in after `late_after` (or session start if unset) is LATE, not blocked. */
+export function isLateCheckIn(window: SessionWindowRow, at: Date): boolean {
+  const lateAfter = parseMinutes(window.late_after ?? window.start_time);
+  if (lateAfter == null) return false;
+  return minutesOfDay(at) > lateAfter;
+}
+
 export function pickWindowForTime(
   windows: SessionWindowRow[],
   at: Date,
@@ -523,6 +533,9 @@ export function computeDirection(confirmedExisting: AttendanceLogRow[]): string 
 }
 
 export function previewToApi(preview: ScanPreview): Record<string, unknown> {
+  const isLate =
+    preview.direction.direction === DIRECTION.in &&
+    isLateCheckIn(preview.window, preview.serverTime);
   const json: Record<string, unknown> = {
     student: {
       id: preview.student.id,
@@ -540,6 +553,7 @@ export function previewToApi(preview: ScanPreview): Record<string, unknown> {
       mode: preview.sessionMode,
     },
     computed_direction: preview.direction.direction,
+    is_late: isLate,
     can_confirm: preview.direction.canScan,
     server_time: preview.serverTime.toISOString(),
     existing_scans: preview.existing.map((e) => ({
@@ -549,6 +563,9 @@ export function previewToApi(preview: ScanPreview): Record<string, unknown> {
   };
   if (!preview.direction.canScan) {
     json.message = `Already timed IN & OUT for ${preview.window.session_label}`;
+  } else if (isLate) {
+    const cutoff = preview.window.late_after ?? preview.window.start_time;
+    json.message = `Arrived after ${cutoff} — will be marked LATE`;
   }
   return json;
 }

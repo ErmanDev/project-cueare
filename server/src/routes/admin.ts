@@ -987,15 +987,14 @@ adminRouter.post(
     const username = requireString(body, 'username');
     const password = requireString(body, 'password');
     if (password.length < 4) throw badRequest('Password must be at least 4 characters');
-    const exists = await q.getUserByUsername(getPool(), username);
-    if (exists) throw conflict('Username already taken');
+    await assertSpecialModeratorIdFree(getPool(), username);
     const created = await q.insertUser(getPool(), {
       name,
       username,
       passwordHash: hashPassword(password),
       role: 'moderator',
     });
-    res.status(201).json(userToApi(created));
+    res.status(201).json(moderatorToApi(created));
   }),
 );
 
@@ -1020,8 +1019,7 @@ adminRouter.put(
     const username = optionalString(body, 'username');
     const password = optionalString(body, 'password');
     if (username && username !== existing.username) {
-      const taken = await q.getUserByUsername(getPool(), username);
-      if (taken && taken.id !== id) throw conflict('Username already taken');
+      await assertSpecialModeratorIdFree(getPool(), username, id);
     }
     if (password && password.length < 4) {
       throw badRequest('Password must be at least 4 characters');

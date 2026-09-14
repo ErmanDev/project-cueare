@@ -13,6 +13,7 @@ abstract class AppTheme {
 
   static const inColor = Color(0xFF15803D); // green — IN scans
   static const outColor = Color(0xFFC2410C); // orange — OUT scans
+  static const lateColor = Color(0xFFD97706); // amber — late IN
   static const blockedColor = accentRed;
 
   static const pagePadding = EdgeInsets.all(16);
