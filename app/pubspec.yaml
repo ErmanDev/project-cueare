@@ -1,5 +1,5 @@
 name: ssc_qr_attendance
-description: "SSC QR Attendance — LAN-only QR event attendance app (Superadmin / Moderator / Student)."
+description: "SSC QR Attendance — QR event attendance against the /api server (Superadmin / Moderator / Student)."
 publish_to: 'none'
 
 version: 1.0.0+1

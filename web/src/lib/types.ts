@@ -6,6 +6,7 @@ export type User = {
   username: string
   role: Role
   created_at?: string
+  student_id?: number | null
 }
 
 export type Student = {
@@ -20,6 +21,7 @@ export type Student = {
   section: string | null
   photo_url: string | null
   qr_payload?: string | null
+  user_id?: number | null
 }
 
 export type EventParticipant = {

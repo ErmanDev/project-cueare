@@ -3,6 +3,7 @@ import type { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 export const ROLES = {
   superadmin: 'superadmin',
   moderator: 'moderator',
+  student: 'student',
 } as const;
 
 export type Role = (typeof ROLES)[keyof typeof ROLES];
@@ -56,6 +57,7 @@ export type StudentRow = {
   year_level: number | null;
   section: string | null;
   photo_url: string | null;
+  user_id: number | null;
   created_at: Date;
   updated_at: Date;
 };

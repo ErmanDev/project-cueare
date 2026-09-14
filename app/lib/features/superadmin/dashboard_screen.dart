@@ -2,15 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/auth/auth_state.dart';
-import '../../core/config/server_settings.dart';
 import '../../core/theme/app_theme.dart';
 import '../../widgets/async_value_widget.dart';
 import '../../widgets/page_scaffold.dart';
 import '../../widgets/status_chip.dart';
-import '../auth/server_config_screen.dart';
 import 'attendance/attendance_screen.dart';
 import 'events/events_screen.dart';
 import 'moderators/moderators_screen.dart';
+import 'sections/sections_screen.dart';
 import 'students/students_screen.dart';
 
 class SuperadminDashboardScreen extends ConsumerWidget {
@@ -19,7 +18,6 @@ class SuperadminDashboardScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final user = ref.watch(currentUserProvider);
-    final server = ref.watch(serverSettingsProvider).value;
     final scheme = Theme.of(context).colorScheme;
 
     final tiles = <_Tile>[
@@ -34,6 +32,12 @@ class SuperadminDashboardScreen extends ConsumerWidget {
         title: 'Students',
         subtitle: 'Add, import, edit, and view QR codes',
         builder: (_) => const StudentsScreen(),
+      ),
+      _Tile(
+        icon: Icons.class_outlined,
+        title: 'Sections',
+        subtitle: 'Browse enrolled students by section',
+        builder: (_) => const SectionsScreen(),
       ),
       _Tile(
         icon: Icons.badge,
@@ -53,15 +57,6 @@ class SuperadminDashboardScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('Superadmin'),
         actions: [
-          IconButton(
-            tooltip: 'Server settings',
-            icon: const Icon(Icons.settings_ethernet),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => const ServerConfigScreen(canPop: true),
-              ),
-            ),
-          ),
           IconButton(
             tooltip: 'Sign out',
             icon: const Icon(Icons.logout),
@@ -114,7 +109,9 @@ class SuperadminDashboardScreen extends ConsumerWidget {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          server?.display ?? 'Server not set',
+                          user?.username != null
+                              ? '@${user!.username}'
+                              : 'ACSSCO Bukidnon',
                           style: Theme.of(context).textTheme.bodySmall
                               ?.copyWith(
                                 color: scheme.onPrimaryContainer.withValues(
@@ -173,7 +170,7 @@ class SuperadminDashboardScreen extends ConsumerWidget {
             ),
           const SizedBox(height: 20),
           Text(
-            'Setup: create an event with sessions → add students → '
+            'Setup: create an event → add sections or students to the roster → '
             'create moderators → moderators scan.',
             textAlign: TextAlign.center,
             style: Theme.of(

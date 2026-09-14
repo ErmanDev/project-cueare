@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/api/repositories.dart';
+import '../../../models/student_model.dart';
 import '../../../models/user_model.dart';
 import '../../../widgets/async_value_widget.dart';
 import '../../../widgets/error_banner.dart';
@@ -18,7 +21,7 @@ class ModeratorsScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Moderators')),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _showForm(context, ref),
+        onPressed: () => _showAdd(context, ref),
         icon: const Icon(Icons.person_add),
         label: const Text('Add moderator'),
       ),
@@ -57,6 +60,11 @@ class ModeratorsScreen extends ConsumerWidget {
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        if (m.studentId != null)
+                          TextButton(
+                            onPressed: () => _demote(context, ref, m),
+                            child: const Text('Demote to student'),
+                          ),
                         IconButton(
                           tooltip: 'Edit / reset password',
                           icon: const Icon(Icons.edit_outlined),
@@ -85,6 +93,24 @@ class ModeratorsScreen extends ConsumerWidget {
     );
   }
 
+  Future<void> _demote(BuildContext context, WidgetRef ref, UserModel m) async {
+    final ok = await confirmDialog(
+      context,
+      title: 'Demote ${m.name} to student?',
+      message: 'They will sign in as a student again.',
+      confirmLabel: 'Demote to student',
+    );
+    if (!ok) return;
+    try {
+      await ref.read(adminRepositoryProvider).demoteModerator(m.id);
+      ref.invalidate(moderatorsProvider);
+      ref.invalidate(studentsProvider);
+      if (context.mounted) showSnack(context, 'Demoted to student');
+    } catch (e) {
+      if (context.mounted) showErrorSnack(context, e);
+    }
+  }
+
   Future<void> _delete(BuildContext context, WidgetRef ref, UserModel m) async {
     final ok = await confirmDialog(
       context,
@@ -103,6 +129,17 @@ class ModeratorsScreen extends ConsumerWidget {
     }
   }
 
+  Future<void> _showAdd(BuildContext context, WidgetRef ref) async {
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (_) => const _AddModeratorDialog(),
+    );
+    if (saved == true) {
+      ref.invalidate(moderatorsProvider);
+      ref.invalidate(studentsProvider);
+    }
+  }
+
   Future<void> _showForm(
     BuildContext context,
     WidgetRef ref, {
@@ -113,6 +150,177 @@ class ModeratorsScreen extends ConsumerWidget {
       builder: (_) => _ModeratorFormDialog(existing: existing),
     );
     if (saved == true) ref.invalidate(moderatorsProvider);
+  }
+}
+
+class _AddModeratorDialog extends ConsumerStatefulWidget {
+  const _AddModeratorDialog();
+
+  @override
+  ConsumerState<_AddModeratorDialog> createState() => _AddModeratorDialogState();
+}
+
+class _AddModeratorDialogState extends ConsumerState<_AddModeratorDialog> {
+  final _search = TextEditingController();
+  Timer? _debounce;
+  List<StudentModel> _results = const [];
+  StudentModel? _selected;
+  bool _loading = true;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchStudents();
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _search.dispose();
+    super.dispose();
+  }
+
+  void _onSearch(String _) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 350), _searchStudents);
+  }
+
+  Future<void> _searchStudents() async {
+    setState(() => _loading = true);
+    try {
+      final page = await ref.read(adminRepositoryProvider).studentsPage(
+        query: _search.text.trim(),
+        perPage: 8,
+      );
+      if (!mounted) return;
+      setState(() {
+        _results = page.students;
+        if (_selected != null &&
+            !_results.any((s) => s.id == _selected!.id)) {
+          _selected = null;
+        }
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() => _results = const []);
+        showErrorSnack(context, e);
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _promote() async {
+    final student = _selected;
+    if (student == null || student.userId != null) return;
+    setState(() => _busy = true);
+    try {
+      await ref
+          .read(adminRepositoryProvider)
+          .promoteStudentToModerator(student.id);
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) showErrorSnack(context, e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return AlertDialog(
+      title: const Text('Add moderator'),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Search a student and promote them to moderator. They sign in with their student ID as username and password until you change it.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _search,
+              onChanged: _onSearch,
+              textInputAction: TextInputAction.search,
+              decoration: const InputDecoration(
+                labelText: 'Search students',
+                hintText: 'Name or student ID',
+                prefixIcon: Icon(Icons.search),
+              ),
+            ),
+            const SizedBox(height: 12),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 280),
+              child: _loading
+                  ? const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(24),
+                        child: CircularProgressIndicator(),
+                      ),
+                    )
+                  : _results.isEmpty
+                  ? const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 16),
+                      child: Text('No matching students'),
+                    )
+                  : ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: _results.length,
+                      itemBuilder: (context, i) {
+                        final s = _results[i];
+                        final already = s.userId != null;
+                        final selected = _selected?.id == s.id;
+                        return ListTile(
+                          selected: selected,
+                          enabled: !already,
+                          leading: CircleAvatar(
+                            backgroundColor: selected
+                                ? scheme.primary
+                                : scheme.primaryContainer,
+                            foregroundColor: selected
+                                ? scheme.onPrimary
+                                : scheme.onPrimaryContainer,
+                            child: Text(
+                              s.fullName.isNotEmpty
+                                  ? s.fullName[0].toUpperCase()
+                                  : '?',
+                            ),
+                          ),
+                          title: Text(s.fullName),
+                          subtitle: Text(
+                            already
+                                ? '${s.studentIdCode} · already a moderator'
+                                : s.studentIdCode,
+                          ),
+                          onTap: already
+                              ? null
+                              : () => setState(() => _selected = s),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _busy ? null : () => Navigator.pop(context, false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(minimumSize: const Size(0, 40)),
+          onPressed: _busy || _selected == null || _selected!.userId != null
+              ? null
+              : _promote,
+          child: Text(_busy ? 'Saving…' : 'Promote moderator'),
+        ),
+      ],
+    );
   }
 }
 
@@ -134,8 +342,6 @@ class _ModeratorFormDialogState extends ConsumerState<_ModeratorFormDialog> {
   final _password = TextEditingController();
   bool _busy = false;
 
-  bool get isEdit => widget.existing != null;
-
   @override
   void dispose() {
     _name.dispose();
@@ -149,20 +355,12 @@ class _ModeratorFormDialogState extends ConsumerState<_ModeratorFormDialog> {
     setState(() => _busy = true);
     final repo = ref.read(adminRepositoryProvider);
     try {
-      if (isEdit) {
-        await repo.updateModerator(
-          widget.existing!.id,
-          name: _name.text.trim(),
-          username: _username.text.trim(),
-          password: _password.text,
-        );
-      } else {
-        await repo.createModerator(
-          name: _name.text.trim(),
-          username: _username.text.trim(),
-          password: _password.text,
-        );
-      }
+      await repo.updateModerator(
+        widget.existing!.id,
+        name: _name.text.trim(),
+        username: _username.text.trim(),
+        password: _password.text,
+      );
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
@@ -174,7 +372,7 @@ class _ModeratorFormDialogState extends ConsumerState<_ModeratorFormDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(isEdit ? 'Edit moderator' : 'New moderator'),
+      title: const Text('Edit moderator'),
       content: Form(
         key: _form,
         child: Column(
@@ -199,14 +397,12 @@ class _ModeratorFormDialogState extends ConsumerState<_ModeratorFormDialog> {
             TextFormField(
               controller: _password,
               obscureText: true,
-              decoration: InputDecoration(
-                labelText: isEdit
-                    ? 'New password (leave blank to keep)'
-                    : 'Password',
+              decoration: const InputDecoration(
+                labelText: 'New password (leave blank to keep)',
               ),
               validator: (v) {
-                if (isEdit && (v == null || v.isEmpty)) return null;
-                if (v == null || v.length < 4) return 'At least 4 characters';
+                if (v == null || v.isEmpty) return null;
+                if (v.length < 4) return 'At least 4 characters';
                 return null;
               },
             ),
@@ -221,7 +417,7 @@ class _ModeratorFormDialogState extends ConsumerState<_ModeratorFormDialog> {
         FilledButton(
           style: FilledButton.styleFrom(minimumSize: const Size(0, 40)),
           onPressed: _busy ? null : _save,
-          child: Text(isEdit ? 'Save' : 'Create'),
+          child: const Text('Save'),
         ),
       ],
     );

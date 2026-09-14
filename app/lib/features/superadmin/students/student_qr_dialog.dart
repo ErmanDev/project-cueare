@@ -71,9 +71,10 @@ class StudentQrCard extends StatelessWidget {
               fontWeight: FontWeight.w700,
             ),
           ),
-          if (student.section != null && student.section!.isNotEmpty)
+          if (student.programLine.isNotEmpty)
             Text(
-              student.section!,
+              student.programLine,
+              textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.black54),
             ),
           const SizedBox(height: 4),

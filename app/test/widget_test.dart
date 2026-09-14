@@ -28,4 +28,11 @@ void main() {
     expect(s?.baseUrl, 'https://attendance.local');
     expect(s?.display, 'attendance.local');
   });
+
+  test('localDev points at the Express API port', () {
+    final s = ServerSettings.localDev();
+    expect(s.port, 8080);
+    expect(s.https, isFalse);
+    expect(s.baseUrl, contains(':8080'));
+  });
 }

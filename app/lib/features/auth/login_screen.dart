@@ -2,14 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/auth/auth_state.dart';
-import '../../core/config/server_settings.dart';
 import '../../core/theme/app_theme.dart';
 import '../../widgets/app_logo.dart';
-import '../../widgets/error_banner.dart';
-import '../../widgets/page_scaffold.dart';
-import 'server_config_screen.dart';
-
-enum _LoginMode { staff, student }
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -21,44 +15,28 @@ class LoginScreen extends ConsumerStatefulWidget {
 class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _username = TextEditingController();
   final _password = TextEditingController();
-  final _studentCode = TextEditingController();
-  final _staffForm = GlobalKey<FormState>();
-  final _studentForm = GlobalKey<FormState>();
+  final _form = GlobalKey<FormState>();
   bool _busy = false;
   bool _obscure = true;
-  _LoginMode _mode = _LoginMode.staff;
+  String? _error;
 
   @override
   void dispose() {
     _username.dispose();
     _password.dispose();
-    _studentCode.dispose();
     super.dispose();
   }
 
-  Future<void> _loginStaff() async {
-    if (!_staffForm.currentState!.validate()) return;
-    setState(() => _busy = true);
+  Future<void> _login() async {
+    if (!_form.currentState!.validate()) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
     try {
-      await ref
-          .read(authProvider.notifier)
-          .login(_username.text, _password.text);
+      await ref.read(authProvider.notifier).login(_username.text, _password.text);
     } catch (e) {
-      if (mounted) showErrorSnack(context, e);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _loginStudent() async {
-    if (!_studentForm.currentState!.validate()) return;
-    setState(() => _busy = true);
-    try {
-      await ref
-          .read(authProvider.notifier)
-          .enterAsStudent(_studentCode.text);
-    } catch (e) {
-      if (mounted) showErrorSnack(context, e);
+      if (mounted) setState(() => _error = e.toString());
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -66,207 +44,194 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final server = ref.watch(serverSettingsProvider).value;
-    final scheme = Theme.of(context).colorScheme;
-
     return Scaffold(
-      body: SafeArea(
-        child: AppPage(
-          maxWidth: AppTheme.formMaxWidth,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Align(
-                alignment: Alignment.centerRight,
-                child: IconButton(
-                  tooltip: 'Server settings',
-                  icon: const Icon(Icons.settings_ethernet),
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const ServerConfigScreen(canPop: true),
-                    ),
-                  ),
-                ),
+      backgroundColor: AppTheme.navyDeep,
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: RadialGradient(
+                center: Alignment(0, -1.05),
+                radius: 1.15,
+                colors: [Color(0xB83A4A84), Color(0x0023326B)],
               ),
-              const AppLogo(size: 160, heroTag: 'app-logo'),
-              const SizedBox(height: 12),
-              Text(
-                'SSC QR Attendance',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.headlineSmall,
+            ),
+          ),
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: RadialGradient(
+                center: Alignment(1.1, 1.1),
+                radius: 0.7,
+                colors: [Color(0x24DA1F28), Color(0x001A2554)],
               ),
-              const SizedBox(height: 4),
-              Text(
-                'ACSSCO Bukidnon Campus',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  color: scheme.primary,
-                  fontWeight: FontWeight.w700,
-                ),
+            ),
+          ),
+          Opacity(
+            opacity: 0.12,
+            child: Center(
+              child: Image.asset(
+                AppLogo.assetPath,
+                width: 320,
+                height: 320,
+                fit: BoxFit.contain,
+                excludeFromSemantics: true,
               ),
-              const SizedBox(height: 16),
-              Center(
-                child: Material(
-                  color: scheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(20),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.dns_outlined,
-                          size: 14,
-                          color: scheme.onSurfaceVariant,
-                        ),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            server?.display ?? 'Server not set',
-                            style: Theme.of(context).textTheme.labelMedium
-                                ?.copyWith(color: scheme.onSurfaceVariant),
-                            overflow: TextOverflow.ellipsis,
-                          ),
+            ),
+          ),
+          SafeArea(
+            child: Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 28),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 440),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(AppTheme.radius),
+                      border: Border.all(
+                        color: AppTheme.navy.withValues(alpha: 0.14),
+                      ),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Color(0x6B080C20),
+                          blurRadius: 64,
+                          offset: Offset(0, 28),
                         ),
                       ],
                     ),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(32, 36, 32, 32),
+                      child: _cardBody(context),
+                    ),
                   ),
                 ),
               ),
-              const SizedBox(height: 20),
-              SegmentedButton<_LoginMode>(
-                segments: const [
-                  ButtonSegment(
-                    value: _LoginMode.staff,
-                    icon: Icon(Icons.badge_outlined),
-                    label: Text('Staff'),
-                  ),
-                  ButtonSegment(
-                    value: _LoginMode.student,
-                    icon: Icon(Icons.qr_code_2),
-                    label: Text('Student'),
-                  ),
-                ],
-                selected: {_mode},
-                onSelectionChanged: (next) {
-                  setState(() => _mode = next.first);
-                },
-              ),
-              const SizedBox(height: 20),
-              if (_mode == _LoginMode.staff)
-                Form(
-                  key: _staffForm,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(
-                        'Superadmin or moderator',
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: scheme.onSurfaceVariant,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextFormField(
-                        controller: _username,
-                        autocorrect: false,
-                        textInputAction: TextInputAction.next,
-                        decoration: const InputDecoration(
-                          labelText: 'Username',
-                          prefixIcon: Icon(Icons.person_outline),
-                        ),
-                        validator: (v) =>
-                            (v == null || v.trim().isEmpty) ? 'Required' : null,
-                      ),
-                      const SizedBox(height: 14),
-                      TextFormField(
-                        controller: _password,
-                        obscureText: _obscure,
-                        textInputAction: TextInputAction.done,
-                        onFieldSubmitted: (_) => _loginStaff(),
-                        decoration: InputDecoration(
-                          labelText: 'Password',
-                          prefixIcon: const Icon(Icons.lock_outline),
-                          suffixIcon: IconButton(
-                            icon: Icon(
-                              _obscure
-                                  ? Icons.visibility_off
-                                  : Icons.visibility,
-                            ),
-                            onPressed: () =>
-                                setState(() => _obscure = !_obscure),
-                          ),
-                        ),
-                        validator: (v) =>
-                            (v == null || v.isEmpty) ? 'Required' : null,
-                      ),
-                      const SizedBox(height: 24),
-                      FilledButton(
-                        onPressed: _busy ? null : _loginStaff,
-                        child: _busy
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Text('Log in'),
-                      ),
-                    ],
-                  ),
-                )
-              else
-                Form(
-                  key: _studentForm,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(
-                        'Enter your student code to show your QR',
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: scheme.onSurfaceVariant,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextFormField(
-                        controller: _studentCode,
-                        autocorrect: false,
-                        textCapitalization: TextCapitalization.characters,
-                        textInputAction: TextInputAction.done,
-                        onFieldSubmitted: (_) => _loginStudent(),
-                        decoration: const InputDecoration(
-                          labelText: 'Student code',
-                          hintText: 'STU-2026-0001',
-                          prefixIcon: Icon(Icons.badge_outlined),
-                        ),
-                        validator: (v) =>
-                            (v == null || v.trim().isEmpty) ? 'Required' : null,
-                      ),
-                      const SizedBox(height: 24),
-                      FilledButton(
-                        onPressed: _busy ? null : _loginStudent,
-                        child: _busy
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Text('Show my QR'),
-                      ),
-                    ],
-                  ),
-                ),
-              const SizedBox(height: 16),
-            ],
+            ),
           ),
-        ),
+        ],
+      ),
+    );
+  }
+
+  Widget _cardBody(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return Theme(
+      data: AppTheme.light(),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const AppLogo(size: 160, heroTag: 'app-logo'),
+          const SizedBox(height: 8),
+          Text(
+            'SSC QR Attendance',
+            textAlign: TextAlign.center,
+            style: text.headlineSmall?.copyWith(
+              color: const Color(0xFF1A1C22),
+              fontWeight: FontWeight.w600,
+              letterSpacing: -0.3,
+              height: 1.15,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'ACSSCO Bukidnon Campus',
+            textAlign: TextAlign.center,
+            style: text.titleSmall?.copyWith(
+              color: AppTheme.navy,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.3,
+            ),
+          ),
+          const SizedBox(height: 28),
+          if (_error != null) ...[
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFDAD8),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                child: Text(
+                  _error!,
+                  style: const TextStyle(
+                    color: Color(0xFF410006),
+                    fontSize: 14,
+                    height: 1.4,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+          Form(
+            key: _form,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextFormField(
+                  controller: _username,
+                  autocorrect: false,
+                  enabled: !_busy,
+                  textInputAction: TextInputAction.next,
+                  decoration: const InputDecoration(
+                    labelText: 'Username or student ID',
+                  ),
+                  validator: (v) =>
+                      (v == null || v.trim().isEmpty) ? 'Required' : null,
+                  onChanged: (_) {
+                    if (_error != null) setState(() => _error = null);
+                  },
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _password,
+                  obscureText: _obscure,
+                  enabled: !_busy,
+                  textInputAction: TextInputAction.done,
+                  onFieldSubmitted: (_) => _login(),
+                  decoration: InputDecoration(
+                    labelText: 'Password',
+                    suffixIcon: IconButton(
+                      tooltip: _obscure ? 'Show password' : 'Hide password',
+                      icon: Icon(
+                        _obscure ? Icons.visibility_off : Icons.visibility,
+                      ),
+                      onPressed: _busy
+                          ? null
+                          : () => setState(() => _obscure = !_obscure),
+                    ),
+                  ),
+                  validator: (v) =>
+                      (v == null || v.isEmpty) ? 'Required' : null,
+                  onChanged: (_) {
+                    if (_error != null) setState(() => _error = null);
+                  },
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Students: default password is your student ID. Change it in the app after you log in.',
+                  style: text.bodySmall?.copyWith(
+                    color: const Color(0xFF5C5E6B),
+                    height: 1.35,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                FilledButton(
+                  onPressed: _busy ? null : _login,
+                  child: _busy
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Log in'),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

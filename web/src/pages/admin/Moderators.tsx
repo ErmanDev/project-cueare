@@ -5,7 +5,7 @@ import { Button, CardListSkeleton, EmptyState, Field, FormActions, Modal, onSubm
 import { api } from '../../lib/api'
 import { initial } from '../../lib/format'
 import { useToast } from '../../lib/toast'
-import type { User } from '../../lib/types'
+import type { Student, StudentPage, User } from '../../lib/types'
 
 type Student = {
   id: number
@@ -39,6 +39,19 @@ export function AdminModerators() {
   useEffect(() => {
     void load()
   }, [])
+
+  async function demote(m: User) {
+    if (!window.confirm(`Demote ${m.name} to student? They will sign in as a student again.`)) {
+      return
+    }
+    try {
+      await api.post(`/admin/moderators/${m.id}/demote`)
+      toast('Demoted to student')
+      await load()
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Demote failed', 'error')
+    }
+  }
 
   async function remove(m: User) {
     if (!window.confirm(`Delete moderator "${m.name}"?`)) return
@@ -109,51 +122,21 @@ export function AdminModerators() {
           }}
         />
       ) : null}
+      {form && form !== 'new' ? (
+        <ModeratorEditForm
+          existing={form}
+          onClose={() => setForm(null)}
+          onSaved={() => {
+            setForm(null)
+            void load()
+          }}
+        />
+      ) : null}
     </>
   )
 }
 
 function AddModeratorForm({
-  onClose,
-  onSaved,
-}: {
-  onClose: () => void
-  onSaved: () => void
-}) {
-  const [mode, setMode] = useState<'student' | 'special'>('student')
-
-  return (
-    <Modal title="Add moderator" onClose={onClose}>
-      <div className="segmented" role="tablist" aria-label="How to add a moderator">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mode === 'student'}
-          className={mode === 'student' ? 'active' : ''}
-          onClick={() => setMode('student')}
-        >
-          Promote student
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mode === 'special'}
-          className={mode === 'special' ? 'active' : ''}
-          onClick={() => setMode('special')}
-        >
-          Create special ID
-        </button>
-      </div>
-      {mode === 'student' ? (
-        <PromoteStudentForm onClose={onClose} onSaved={onSaved} />
-      ) : (
-        <CreateSpecialModeratorForm onClose={onClose} onSaved={onSaved} />
-      )}
-    </Modal>
-  )
-}
-
-function PromoteStudentForm({
   onClose,
   onSaved,
 }: {
@@ -210,7 +193,7 @@ function PromoteStudentForm({
   }
 
   return (
-    <>
+    <Modal title="Add moderator" onClose={onClose}>
       <p className="muted">
         Search a student, then promote them to moderator. They sign in with their student ID as
         username and password until you change it.
@@ -261,80 +244,7 @@ function PromoteStudentForm({
           {busy ? 'Saving…' : 'Promote moderator'}
         </Button>
       </div>
-    </>
-  )
-}
-
-function CreateSpecialModeratorForm({
-  onClose,
-  onSaved,
-}: {
-  onClose: () => void
-  onSaved: () => void
-}) {
-  const { toast } = useToast()
-  const [name, setName] = useState('')
-  const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
-  const [busy, setBusy] = useState(false)
-
-  async function save() {
-    if (password.length < 4) {
-      toast('Password must be at least 4 characters', 'error')
-      return
-    }
-    setBusy(true)
-    try {
-      await api.post('/admin/moderators', {
-        name: name.trim(),
-        username: username.trim(),
-        password,
-      })
-      toast('Moderator created')
-      onSaved()
-    } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not create moderator', 'error')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <form className="form-grid" onSubmit={onSubmit(save)}>
-      <p className="muted">
-        Create a login that is not already used. To use a student ID, switch to Promote student
-        and fetch them first.
-      </p>
-      <Field label="Full name">
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          required
-          autoFocus
-          autoComplete="off"
-        />
-      </Field>
-      <Field label="Special ID">
-        <input
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          required
-          maxLength={100}
-          autoComplete="off"
-        />
-      </Field>
-      <Field label="Password">
-        <input
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-          minLength={4}
-          autoComplete="new-password"
-        />
-      </Field>
-      <FormActions onCancel={onClose} submitLabel="Create moderator" busy={busy} />
-    </form>
+    </Modal>
   )
 }
 
@@ -343,42 +253,29 @@ function ModeratorEditForm({
   onClose,
   onSaved,
 }: {
-  existing: User | null
+  existing: User
   onClose: () => void
   onSaved: () => void
 }) {
   const { toast } = useToast()
-  const isEdit = existing != null
-  const [name, setName] = useState(existing?.name ?? '')
-  const [username, setUsername] = useState(existing?.username ?? '')
+  const [name, setName] = useState(existing.name)
+  const [username, setUsername] = useState(existing.username)
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
 
   async function save() {
-    if (!isEdit && password.length < 4) {
-      toast('Password must be at least 4 characters', 'error')
-      return
-    }
-    if (isEdit && password && password.length < 4) {
+    if (password && password.length < 4) {
       toast('Password must be at least 4 characters', 'error')
       return
     }
     setBusy(true)
     try {
-      if (isEdit) {
-        await api.put(`/admin/moderators/${existing.id}`, {
-          name: name.trim(),
-          username: username.trim(),
-          ...(password ? { password } : {}),
-        })
-      } else {
-        await api.post('/admin/moderators', {
-          name: name.trim(),
-          username: username.trim(),
-          password,
-        })
-      }
-      toast(isEdit ? 'Moderator saved' : 'Moderator created')
+      await api.put(`/admin/moderators/${existing.id}`, {
+        name: name.trim(),
+        username: username.trim(),
+        ...(password ? { password } : {}),
+      })
+      toast('Moderator saved')
       onSaved()
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Save failed', 'error')
@@ -388,7 +285,7 @@ function ModeratorEditForm({
   }
 
   return (
-    <Modal title={isEdit ? 'Edit moderator' : 'New moderator'} onClose={onClose}>
+    <Modal title="Edit moderator" onClose={onClose}>
       <form className="form-grid" onSubmit={onSubmit(save)}>
         <Field label="Full name">
           <input value={name} onChange={(e) => setName(e.target.value)} required />
@@ -396,17 +293,25 @@ function ModeratorEditForm({
         <Field label="Username">
           <input value={username} onChange={(e) => setUsername(e.target.value)} required autoComplete="off" />
         </Field>
-        <Field label={isEdit ? 'New password (leave blank to keep)' : 'Password'}>
+        <Field label="New password (leave blank to keep)">
           <input
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            required={!isEdit}
             autoComplete="new-password"
           />
         </Field>
-        <FormActions onCancel={onClose} submitLabel={isEdit ? 'Save' : 'Create'} busy={busy} />
+        <FormActions onCancel={onClose} submitLabel="Save" busy={busy} />
       </form>
     </Modal>
   )
+}
+
+function useDebounced(value: string, ms: number): string {
+  const [v, setV] = useState(value)
+  useEffect(() => {
+    const t = window.setTimeout(() => setV(value), ms)
+    return () => window.clearTimeout(t)
+  }, [value, ms])
+  return v
 }

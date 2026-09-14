@@ -1,9 +1,11 @@
 import type { ReactNode } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { Shell } from './components/Shell'
 import { BootSkeleton } from './components/ui'
 import { AuthProvider, useAuth } from './lib/auth'
+import { ErrorPage } from './pages/ErrorPage'
 import { ModeratorProvider } from './lib/moderator'
 import { ToastProvider } from './lib/toast'
 import type { Role } from './lib/types'
@@ -60,7 +62,8 @@ export default function App() {
   return (
     <AuthProvider>
       <ToastProvider>
-        <Routes>
+        <ErrorBoundary>
+          <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/superadmin" element={<AdminLayout />}>
             <Route index element={<AdminDashboard />} />
@@ -80,8 +83,9 @@ export default function App() {
             <Route path="history" element={<ModeratorHistory />} />
           </Route>
           <Route path="/" element={<HomeRedirect />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+          <Route path="*" element={<ErrorPage kind="not-found" />} />
+          </Routes>
+        </ErrorBoundary>
       </ToastProvider>
     </AuthProvider>
   )

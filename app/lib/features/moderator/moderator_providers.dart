@@ -4,7 +4,7 @@ import '../../core/api/repositories.dart';
 import '../../models/attendance_log_model.dart';
 import '../../models/event_model.dart';
 
-/// Active events (today's first) from the server.
+/// Active events (today's first).
 final activeEventsProvider = FutureProvider<List<EventModel>>(
   (ref) => ref.watch(moderatorRepositoryProvider).activeEvents(),
 );

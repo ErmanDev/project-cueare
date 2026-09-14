@@ -25,7 +25,7 @@ class StaffSession extends AuthSession {
   UserRole get role => user.role;
 }
 
-/// A student who entered their code (no server login).
+/// A student signed in with student ID as username and password.
 class StudentSession extends AuthSession {
   const StudentSession({required this.studentIdCode});
   final String studentIdCode;
@@ -41,7 +41,7 @@ class AuthNotifier extends AsyncNotifier<AuthSession> {
     // If the API client sees a 401 it clears the in-memory token; bounce the
     // user to the login screen when that happens.
     ref.listen<String?>(authTokenProvider, (previous, next) {
-      if (previous != null && next == null && state.value is StaffSession) {
+      if (previous != null && next == null && state.value is! SignedOut) {
         _clearStaff();
         state = const AsyncData(SignedOut());
       }
@@ -50,6 +50,11 @@ class AuthNotifier extends AsyncNotifier<AuthSession> {
     final prefs = await SharedPreferences.getInstance();
     final studentCode = prefs.getString(_studentKey);
     if (studentCode != null && studentCode.isNotEmpty) {
+      final liveToken = ref.read(authTokenProvider);
+      final token = liveToken ?? await SessionStore.read(_tokenKey);
+      if (liveToken == null && token != null && token.isNotEmpty) {
+        ref.read(authTokenProvider.notifier).set(token);
+      }
       return StudentSession(studentIdCode: studentCode);
     }
 
@@ -86,32 +91,53 @@ class AuthNotifier extends AsyncNotifier<AuthSession> {
     return StaffSession(user: user, token: token);
   }
 
-  /// Username/password login for staff.
+  /// Staff username/password, or student ID as both username and password.
   Future<void> login(String username, String password) async {
     final api = ref.read(apiClientProvider);
     final res = await api.postJson(ApiEndpoints.login, {
       'username': username.trim(),
       'password': password,
     });
+    final role = res['role'] as String?;
+    if (role == 'student') {
+      final student = res['student'] as Map<String, dynamic>?;
+      final user = res['user'] as Map<String, dynamic>?;
+      final code =
+          (student?['student_id_code'] as String?) ??
+          (user?['username'] as String?) ??
+          username.trim();
+      final token = res['token'] as String?;
+      await _clearStaff();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_studentKey, code);
+      if (token != null && token.isNotEmpty) {
+        await SessionStore.write(_tokenKey, token);
+        ref.read(authTokenProvider.notifier).set(token);
+      } else {
+        ref.read(authTokenProvider.notifier).set(null);
+      }
+      state = AsyncData(StudentSession(studentIdCode: code));
+      return;
+    }
     final token = res['token'] as String;
     final user = UserModel.fromJson(res['user'] as Map<String, dynamic>);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_studentKey);
     await SessionStore.write(_tokenKey, token);
     await SessionStore.write(_userKey, _encode(user));
     ref.read(authTokenProvider.notifier).set(token);
     state = AsyncData(StaffSession(user: user, token: token));
   }
 
-  /// Student "login": confirm the code exists, then remember it locally.
-  Future<void> enterAsStudent(String studentIdCode) async {
-    final code = studentIdCode.trim();
-    if (code.isEmpty) {
-      throw const ApiFailure(message: 'Enter your student code');
-    }
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
     final api = ref.read(apiClientProvider);
-    await api.getJson(ApiEndpoints.studentQr(code));
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_studentKey, code);
-    state = AsyncData(StudentSession(studentIdCode: code));
+    await api.postJson(ApiEndpoints.changePassword, {
+      'current_password': currentPassword,
+      'new_password': newPassword,
+    });
   }
 
   Future<void> signOut() async {

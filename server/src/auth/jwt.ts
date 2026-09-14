@@ -6,7 +6,7 @@ import { ROLES, type AuthUser } from '../types.ts';
 const ISSUER = 'ssc-qr-attendance';
 
 export function isValidRole(role: string | null | undefined): boolean {
-  return role === ROLES.superadmin || role === ROLES.moderator;
+  return role === ROLES.superadmin || role === ROLES.moderator || role === ROLES.student;
 }
 
 export function issueToken(user: { id: number; username: string; role: string }): string {

@@ -2,7 +2,21 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/repositories.dart';
 import '../../models/attendance_log_model.dart';
+import '../../models/student_event_model.dart';
+import '../../models/student_fine_model.dart';
 import '../../models/student_model.dart';
+
+final myEventsProvider = FutureProvider<List<StudentEventModel>>(
+  (ref) => ref.watch(studentRepositoryProvider).myEvents(),
+);
+
+final myEventQrProvider = FutureProvider.family<StudentEventQrModel, int>(
+  (ref, eventId) => ref.watch(studentRepositoryProvider).myEventQr(eventId),
+);
+
+final myFinesProvider = FutureProvider<List<StudentFineModel>>(
+  (ref) => ref.watch(studentRepositoryProvider).myFines(),
+);
 
 final myStudentProvider = FutureProvider.family<StudentModel, String>(
   (ref, code) => ref.watch(studentRepositoryProvider).myQr(code),

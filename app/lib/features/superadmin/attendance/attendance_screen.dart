@@ -378,6 +378,9 @@ class _AttendanceRow extends StatelessWidget {
       subtitle: Text(
         [
           if (log.studentIdCode != null) log.studentIdCode!,
+          if (log.course != null && log.course!.isNotEmpty) log.course!,
+          if (log.yearLevel != null) Fmt.yearLevel(log.yearLevel),
+          if (log.studentSection != null) log.studentSection!,
           log.sessionLabel ?? 'Session #${log.sessionWindowId}',
           Fmt.dateTime(log.scannedAt),
           if (!log.isConfirmed) 'CANCELLED',

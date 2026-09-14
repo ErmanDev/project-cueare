@@ -77,7 +77,7 @@ class ScanResultSheet extends StatelessWidget {
                       Text(
                         [
                           s.studentIdCode,
-                          if (s.section != null) s.section!,
+                          if (s.programLine.isNotEmpty) s.programLine,
                         ].join(' · '),
                         style: TextStyle(color: scheme.onSurfaceVariant),
                       ),

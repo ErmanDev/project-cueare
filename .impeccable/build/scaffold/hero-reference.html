@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Scaffold reference: desk-note.png</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poltawski+Nowy:wght@400&display=swap">
+  <link rel="stylesheet" href="layout.css">
+  <style>html,body{margin:0}body{background:#f8f8f8}.region{box-sizing:border-box}.region.text p{white-space:pre-wrap}</style>
+</head>
+<body>
+<!-- Reference only. Every region sits at its measured box inside a comp-aspect frame. Take the boxes (layout.css), keep your own semantic structure. -->
+<main class="comp-frame" style="max-width:1280px">
+  <div class="r-ground region texture" data-region="ground" style="background-image:url('../../../assets/plates/ground.png');background-repeat:repeat"></div>
+  <figure class="r-crest region plate" data-region="crest"><img src="../../../assets/plates/crest.png" alt="" style="width:100%;height:100%;object-fit:contain;object-position:top left"></figure>
+  <div class="r-card region chrome" data-region="card"><!-- White empty-state card with a thin navy-tinted rounded border. --></div>
+  <div class="r-headline region text" data-region="headline"><!-- Source Serif headline: This page isn't here. --><p style="font-size:var(--r-headline-font);font-family:var(--r-headline-family),sans-serif;font-weight:var(--r-headline-weight);line-height:1.05;margin:0">headline</p></div>
+  <div class="r-body region text" data-region="body"><!-- Source Sans body: That address doesn't match a page in SSC QR Attendance. You can go back, or return home. --><p style="font-size:var(--r-body-font);line-height:1.05;margin:0">body</p></div>
+  <div class="r-primary region control" data-region="primary"><!-- Navy rounded primary button: Take me home.: rebuild the control's chrome from the crop (comp-spec.mjs --crop primary); its ink box, border, fill, radius, and label size are the comp's --></div>
+  <div class="r-back region control" data-region="back"><!-- Ghost text button: Go back.: rebuild the control's chrome from the crop (comp-spec.mjs --crop back); its ink box, border, fill, radius, and label size are the comp's --></div>
+</main>
+</body>
+</html>

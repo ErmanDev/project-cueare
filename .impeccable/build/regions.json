@@ -1,0 +1,51 @@
+{
+  "regions": [
+    {
+      "id": "ground",
+      "kind": "texture",
+      "grid": "A0:A0",
+      "note": "Clean paper-white work-surface sample with no ink."
+    },
+    {
+      "id": "crest",
+      "kind": "plate",
+      "grid": "E1:G3",
+      "note": "Official ACSSCO Bukidnon Campus shield crest, centered above the headline."
+    },
+    {
+      "id": "card",
+      "kind": "chrome",
+      "grid": "D1:H8",
+      "container": true,
+      "note": "White empty-state card with a thin navy-tinted rounded border."
+    },
+    {
+      "id": "headline",
+      "kind": "text",
+      "grid": "D4:H4",
+      "snap": false,
+      "note": "Source Serif headline: This page isn't here."
+    },
+    {
+      "id": "body",
+      "kind": "text",
+      "grid": "D5:H5",
+      "snap": false,
+      "note": "Source Sans body: That address doesn't match a page in SSC QR Attendance. You can go back, or return home."
+    },
+    {
+      "id": "primary",
+      "kind": "control",
+      "grid": "D6:H7",
+      "snap": false,
+      "note": "Navy rounded primary button: Take me home."
+    },
+    {
+      "id": "back",
+      "kind": "control",
+      "grid": "E8:G8",
+      "snap": false,
+      "note": "Ghost text button: Go back."
+    }
+  ]
+}

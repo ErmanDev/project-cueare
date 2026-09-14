@@ -249,6 +249,7 @@ const STUDENT_SELECT = `
     cur.year_level,
     sec.${q('sectionName')} AS section,
     s.${q('photoUrl')} AS photo_url,
+    s.${q('userId')} AS user_id,
     s.${q('createdAtUtc')} AS created_at,
     s.${q('updatedAtUtc')} AS updated_at
   FROM ${q('Students')} s
@@ -451,6 +452,47 @@ export async function getModeratorById(db: Queryable, id: number): Promise<UserR
 
 export async function deleteUser(db: Queryable, id: number): Promise<void> {
   await db.query(`DELETE FROM ${q('Users')} WHERE ${q('userId')} = $1`, [id]);
+}
+
+export async function linkStudentToUser(
+  db: Queryable,
+  studentId: number,
+  userId: number,
+): Promise<void> {
+  await db.query(
+    `UPDATE ${q('Students')}
+        SET ${q('userId')} = $1, ${q('updatedAtUtc')} = clock_timestamp()
+      WHERE ${q('studentId')} = $2`,
+    [userId, studentId],
+  );
+}
+
+export async function unlinkStudentsFromUser(db: Queryable, userId: number): Promise<void> {
+  await db.query(
+    `UPDATE ${q('Students')}
+        SET ${q('userId')} = NULL, ${q('updatedAtUtc')} = clock_timestamp()
+      WHERE ${q('userId')} = $1`,
+    [userId],
+  );
+}
+
+export async function getStudentByUserId(
+  db: Queryable,
+  userId: number,
+): Promise<StudentRow | null> {
+  return one<StudentRow>(db, `${STUDENT_SELECT} WHERE s.${q('userId')} = $1`, [userId]);
+}
+
+export async function listLinkedStudentIdsByUser(
+  db: Queryable,
+): Promise<Map<number, number>> {
+  const rows = await many<{ user_id: number; student_id: number }>(
+    db,
+    `SELECT ${q('userId')} AS user_id, ${q('studentId')} AS student_id
+       FROM ${q('Students')}
+      WHERE ${q('userId')} IS NOT NULL`,
+  );
+  return new Map(rows.map((r) => [Number(r.user_id), Number(r.student_id)]));
 }
 
 export async function countScansByModerator(db: Queryable, userId: number): Promise<number> {
@@ -1738,6 +1780,113 @@ export async function getRegisteredSessionParticipant(
        AND er.${q('registrationStatusCode')} = 'ACTIVE'`,
     [eventId, studentId, sessionId],
   );
+}
+
+export type StudentEventSessionRow = {
+  event_id: number;
+  session_id: number;
+  session_name: string;
+  session_date: string;
+  status: string;
+  checked_in_at_utc: Date | null;
+  checked_out_at_utc: Date | null;
+};
+
+export async function listRegisteredEventsForStudent(
+  db: Queryable,
+  studentId: number,
+): Promise<EventRow[]> {
+  return many<EventRow>(
+    db,
+    `${EVENT_SELECT}
+     WHERE EXISTS (
+       SELECT 1 FROM ${q('EventRegistrations')} er
+       WHERE er.${q('eventId')} = e.${q('eventId')}
+         AND er.${q('studentId')} = $1
+         AND er.${q('registrationStatusCode')} = 'ACTIVE'
+     )
+     ORDER BY e.${q('eventDate')} DESC, e.${q('eventName')} ASC`,
+    [studentId],
+  );
+}
+
+export async function listStudentEventSessions(
+  db: Queryable,
+  studentId: number,
+): Promise<StudentEventSessionRow[]> {
+  return many<StudentEventSessionRow>(
+    db,
+    `SELECT er.${q('eventId')} AS event_id,
+       es.${q('eventSessionId')} AS session_id,
+       es.${q('sessionName')} AS session_name,
+       es.${q('startsAtUtc')}::date::text AS session_date,
+       COALESCE(st.${q('attendanceStatusCode')}, 'PENDING') AS status,
+       st.${q('checkedInAtUtc')} AS checked_in_at_utc,
+       st.${q('checkedOutAtUtc')} AS checked_out_at_utc
+     FROM ${q('EventRegistrations')} er
+     JOIN ${q('EventSessions')} es ON es.${q('eventId')} = er.${q('eventId')}
+     LEFT JOIN ${q('AttendanceSessionStatus')} st
+       ON st.${q('eventSessionId')} = es.${q('eventSessionId')}
+       AND st.${q('studentId')} = er.${q('studentId')}
+     WHERE er.${q('studentId')} = $1
+       AND er.${q('registrationStatusCode')} = 'ACTIVE'
+     ORDER BY es.${q('startsAtUtc')}, es.${q('sortOrder')}`,
+    [studentId],
+  );
+}
+
+export async function getActiveStudentEventToken(
+  db: Queryable,
+  eventId: number,
+  studentId: number,
+): Promise<string | null> {
+  const row = await one<{ token: string }>(
+    db,
+    `SELECT c.token::text AS token
+       FROM ${q('EventParticipantQrCredentials')} c
+       JOIN ${q('EventRegistrations')} er
+         ON er.${q('eventRegistrationId')} = c.${q('eventRegistrationId')}
+      WHERE er.${q('eventId')} = $1
+        AND er.${q('studentId')} = $2
+        AND er.${q('registrationStatusCode')} = 'ACTIVE'
+        AND c.${q('revokedAtUtc')} IS NULL
+        AND (c.${q('expiresAtUtc')} IS NULL OR c.${q('expiresAtUtc')} > clock_timestamp())
+      ORDER BY c.${q('issuedAtUtc')} DESC
+      LIMIT 1`,
+    [eventId, studentId],
+  );
+  return row?.token ?? null;
+}
+
+export async function ensureStudentEventQrToken(
+  db: Queryable,
+  eventId: number,
+  studentId: number,
+  issuedByUserId: number,
+): Promise<string | null> {
+  const existing = await getActiveStudentEventToken(db, eventId, studentId);
+  if (existing) return existing;
+  const registration = await one<{ event_registration_id: number }>(
+    db,
+    `SELECT er.${q('eventRegistrationId')} AS event_registration_id
+       FROM ${q('EventRegistrations')} er
+      WHERE er.${q('eventId')} = $1
+        AND er.${q('studentId')} = $2
+        AND er.${q('registrationStatusCode')} = 'ACTIVE'`,
+    [eventId, studentId],
+  );
+  if (!registration) return null;
+  const created = await one<{ token: string }>(
+    db,
+    `INSERT INTO ${q('EventParticipantQrCredentials')} (
+        ${q('eventRegistrationId')}, token, ${q('tokenHash')}, ${q('issuedByUserId')}
+     )
+     SELECT $1, token, decode(md5(token::text), 'hex'), $2
+       FROM (SELECT gen_random_uuid() AS token) issued
+     RETURNING token::text AS token`,
+    [registration.event_registration_id, issuedByUserId],
+  );
+  return created?.token ?? null;
 }
 
 export async function publishEvent(

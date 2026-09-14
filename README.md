@@ -126,7 +126,7 @@ the student code instead.
 |---|---|---|
 | Superadmin | `admin` / `changeme123` (change it!) | Events + session windows, students (single/CSV import, QR preview), moderator accounts, attendance records (filter / edit / delete / export CSV) |
 | Moderator | account created by superadmin | Pick event → **[Auto \| Morning \| Afternoon]** → scan → confirm/cancel; "My scans today" |
-| Student | just their student code, no password | My QR, My attendance |
+| Student | student ID as username and password | My QR, My attendance |
 
 Setup order: **event with session windows → students → moderators → scan.**
 

@@ -11,6 +11,10 @@ import {
 import { api, clearSession, getStoredUser, getToken, setSession } from './api'
 import type { Role, User } from './types'
 
+function isStaffRole(role: string | undefined): role is Role {
+  return role === 'superadmin' || role === 'moderator'
+}
+
 type AuthContextValue = {
   user: User | null
   ready: boolean
@@ -41,6 +45,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     api
       .get<{ user: User }>('/auth/me')
       .then((res) => {
+        if (!isStaffRole(res.user.role)) {
+          clearSession()
+          setUser(null)
+          return
+        }
         setUser(res.user)
         setSession(token, JSON.stringify(res.user))
       })
@@ -60,6 +69,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       username,
       password,
     })
+    if (!isStaffRole(res.user.role)) {
+      throw new Error('Students sign in on the mobile app.')
+    }
     setSession(res.token, JSON.stringify(res.user))
     setUser(res.user)
   }, [])

@@ -9,6 +9,21 @@ export function hashPassword(password: string, iterations = DEFAULT_ITERATIONS):
   return `pbkdf2$${iterations}$${salt.toString('base64')}$${dk.toString('base64')}`;
 }
 
+/** Strip spaces and compare student-id passwords case-insensitively. */
+export function normalizeStudentPasswordPart(value: string): string {
+  return value.replace(/\s+/g, '').toLowerCase();
+}
+
+/** Default student password is the student ID. */
+export function verifyStudentLoginPassword(
+  password: string,
+  studentIdCode: string,
+): boolean {
+  const given = normalizeStudentPasswordPart(password);
+  const id = normalizeStudentPasswordPart(studentIdCode);
+  return Boolean(id) && given === id;
+}
+
 export function verifyPassword(password: string, stored: string): boolean {
   const parts = stored.split('$');
   if (parts.length !== 4 || parts[0] !== 'pbkdf2') return false;

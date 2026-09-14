@@ -1,0 +1,372 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-14T06:55:00+08:00",
+  "title": "Design System: SSC QR Attendance",
+  "extensions": {
+    "colorMeta": {
+      "navy": {
+        "role": "primary",
+        "displayName": "Campus Navy",
+        "canonical": "#23326b",
+        "tonalRamp": ["#0f1633", "#1a2554", "#23326b", "#3a4a84", "#6b7ab0", "#9aa6d0", "#d9def0", "#f0f2f8"]
+      },
+      "navy-deep": {
+        "role": "primary",
+        "displayName": "Navy Deep",
+        "canonical": "#1a2554",
+        "tonalRamp": ["#0a1028", "#121a3d", "#1a2554", "#2a3870", "#4a5a94", "#7a88b8", "#b4c0f0", "#e8ebf6"]
+      },
+      "on-primary": {
+        "role": "neutral",
+        "displayName": "On Primary",
+        "canonical": "#ffffff",
+        "tonalRamp": ["#1a1c22", "#454754", "#757686", "#c5c6d6", "#dee0ec", "#eaecf5", "#f7f8fc", "#ffffff"]
+      },
+      "primary-container": {
+        "role": "primary",
+        "displayName": "Primary Container",
+        "canonical": "#d9def0",
+        "tonalRamp": ["#1a2554", "#23326b", "#3a4a84", "#6b7ab0", "#9aa6d0", "#c5cce4", "#d9def0", "#f0f2f8"]
+      },
+      "on-primary-container": {
+        "role": "primary",
+        "displayName": "On Primary Container",
+        "canonical": "#1a2554",
+        "tonalRamp": ["#0f1633", "#1a2554", "#23326b", "#3a4a84", "#6b7ab0", "#9aa6d0", "#d9def0", "#f0f2f8"]
+      },
+      "accent-red": {
+        "role": "secondary",
+        "displayName": "Campus Red",
+        "canonical": "#da1f28",
+        "tonalRamp": ["#410006", "#68000e", "#930018", "#da1f28", "#ff6b6b", "#ffb3ae", "#ffdad8", "#fff5f4"]
+      },
+      "on-error": {
+        "role": "neutral",
+        "displayName": "On Error",
+        "canonical": "#ffffff",
+        "tonalRamp": ["#410006", "#68000e", "#930018", "#da1f28", "#ffb3ae", "#ffdad8", "#fff0ef", "#ffffff"]
+      },
+      "error-container": {
+        "role": "secondary",
+        "displayName": "Error Container",
+        "canonical": "#ffdad8",
+        "tonalRamp": ["#410006", "#68000e", "#930018", "#da1f28", "#ff6b6b", "#ffb3ae", "#ffdad8", "#fff5f4"]
+      },
+      "on-error-container": {
+        "role": "secondary",
+        "displayName": "On Error Container",
+        "canonical": "#410006",
+        "tonalRamp": ["#2a0004", "#410006", "#68000e", "#930018", "#da1f28", "#ffb3ae", "#ffdad8", "#fff5f4"]
+      },
+      "status-in": {
+        "role": "tertiary",
+        "displayName": "Status In",
+        "canonical": "#15803d",
+        "tonalRamp": ["#052e16", "#14532d", "#15803d", "#16a34a", "#4ade80", "#86efac", "#bbf7d0", "#f0fdf4"]
+      },
+      "status-out": {
+        "role": "tertiary",
+        "displayName": "Status Out",
+        "canonical": "#c2410c",
+        "tonalRamp": ["#431407", "#7c2d12", "#c2410c", "#ea580c", "#fb923c", "#fdba74", "#fed7aa", "#fff7ed"]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Cool Paper",
+        "canonical": "#f7f8fc",
+        "tonalRamp": ["#1a1c22", "#454754", "#757686", "#c5c6d6", "#dee0ec", "#eaecf5", "#f1f3fa", "#f7f8fc"]
+      },
+      "on-surface": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "#1a1c22",
+        "tonalRamp": ["#12141a", "#1a1c22", "#454754", "#757686", "#c5c6d6", "#dee0ec", "#f1f3fa", "#f7f8fc"]
+      },
+      "on-surface-variant": {
+        "role": "neutral",
+        "displayName": "Muted",
+        "canonical": "#454754",
+        "tonalRamp": ["#1a1c22", "#2c2e38", "#454754", "#757686", "#8f90a0", "#c5c6d6", "#e4e6f1", "#f7f8fc"]
+      },
+      "outline": {
+        "role": "neutral",
+        "displayName": "Outline",
+        "canonical": "#757686",
+        "tonalRamp": ["#1a1c22", "#454754", "#5c5d6c", "#757686", "#8f90a0", "#c5c6d6", "#dee0ec", "#f1f3fa"]
+      },
+      "outline-variant": {
+        "role": "neutral",
+        "displayName": "Outline Variant",
+        "canonical": "#c5c6d6",
+        "tonalRamp": ["#454754", "#757686", "#8f90a0", "#a8a9b8", "#c5c6d6", "#dee0ec", "#eaecf5", "#f7f8fc"]
+      },
+      "surface-lowest": {
+        "role": "neutral",
+        "displayName": "Plate White",
+        "canonical": "#ffffff",
+        "tonalRamp": ["#dee0ec", "#e4e6f1", "#eaecf5", "#f1f3fa", "#f7f8fc", "#fafbfe", "#fcfcff", "#ffffff"]
+      },
+      "surface-low": {
+        "role": "neutral",
+        "displayName": "Surface Low",
+        "canonical": "#f1f3fa",
+        "tonalRamp": ["#33353c", "#454754", "#c5c6d6", "#dee0ec", "#e4e6f1", "#eaecf5", "#f1f3fa", "#f7f8fc"]
+      },
+      "surface-container": {
+        "role": "neutral",
+        "displayName": "Surface Container",
+        "canonical": "#eaecf5",
+        "tonalRamp": ["#1e2026", "#454754", "#c5c6d6", "#dee0ec", "#e4e6f1", "#eaecf5", "#f1f3fa", "#f7f8fc"]
+      },
+      "surface-high": {
+        "role": "neutral",
+        "displayName": "Surface High",
+        "canonical": "#e4e6f1",
+        "tonalRamp": ["#282a31", "#454754", "#c5c6d6", "#dee0ec", "#e4e6f1", "#eaecf5", "#f1f3fa", "#f7f8fc"]
+      },
+      "surface-highest": {
+        "role": "neutral",
+        "displayName": "Surface Highest",
+        "canonical": "#dee0ec",
+        "tonalRamp": ["#33353c", "#454754", "#757686", "#c5c6d6", "#dee0ec", "#e4e6f1", "#eaecf5", "#f1f3fa"]
+      },
+      "inverse-surface": {
+        "role": "neutral",
+        "displayName": "Inverse Surface",
+        "canonical": "#1a2554",
+        "tonalRamp": ["#0f1633", "#1a2554", "#23326b", "#3a4a84", "#6b7ab0", "#b4c0f0", "#e3e5ed", "#f0f1f8"]
+      },
+      "on-inverse": {
+        "role": "neutral",
+        "displayName": "On Inverse",
+        "canonical": "#f0f1f8",
+        "tonalRamp": ["#1a2554", "#454754", "#757686", "#c5c6d6", "#dee0ec", "#e3e5ed", "#f0f1f8", "#ffffff"]
+      },
+      "error-ground": {
+        "role": "neutral",
+        "displayName": "Desk Ground",
+        "canonical": "#f8f8f8",
+        "tonalRamp": ["#353535", "#6a6a6a", "#9a9a9a", "#c8c8c8", "#e4e4e4", "#f0f0f0", "#f8f8f8", "#ffffff"]
+      },
+      "error-ink": {
+        "role": "neutral",
+        "displayName": "Recovery Ink",
+        "canonical": "#101d49",
+        "tonalRamp": ["#080e28", "#101d49", "#1a2554", "#23326b", "#3a4a84", "#6b7ab0", "#d9def0", "#f0f2f8"]
+      },
+      "error-muted": {
+        "role": "neutral",
+        "displayName": "Desk Muted",
+        "canonical": "#353535",
+        "tonalRamp": ["#141414", "#353535", "#4a4a4a", "#6a6a6a", "#9a9a9a", "#c8c8c8", "#e4e4e4", "#f8f8f8"]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Recovery headline only; 2.25rem (2rem below 640px), max about 20ch."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Page heads and the login product title in Campus Navy."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Modal titles, calendar month, empty-state headings."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Work copy at 1rem / 1.35; recovery sentence steps to 1.125rem / 1.45, max about 36ch."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Field captions, table headers, chips, and sidebar chrome."
+      }
+    },
+    "shadows": [
+      {
+        "name": "desk-plate",
+        "value": "0 8px 24px rgba(26, 37, 84, 0.12)",
+        "purpose": "Recovery card and default toasts."
+      },
+      {
+        "name": "door-plate",
+        "value": "0 1px 0 rgba(255, 255, 255, 0.95) inset, 0 28px 64px rgba(8, 12, 32, 0.42)",
+        "purpose": "Login card on the navy stage only."
+      },
+      {
+        "name": "overlay",
+        "value": "0 16px 48px rgba(26, 37, 84, 0.12)",
+        "purpose": "Modals."
+      },
+      {
+        "name": "whisper",
+        "value": "0 1px 3px rgba(26, 37, 84, 0.12)",
+        "purpose": "Active segmented control."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-settle",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Recovery card 220ms settle; login card 280ms."
+      },
+      {
+        "name": "duration-recovery",
+        "value": "220ms",
+        "purpose": "Error card entrance translateY(8px) to rest."
+      },
+      {
+        "name": "duration-login",
+        "value": "280ms",
+        "purpose": "Login card entrance fade and 8px rise."
+      }
+    ],
+    "breakpoints": [
+      { "name": "narrow-login", "value": "480px" },
+      { "name": "home-tiles", "value": "560px" },
+      { "name": "recovery", "value": "640px" },
+      { "name": "calendar", "value": "840px" },
+      { "name": "shell", "value": "900px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Campus-navy fill action for commit, submit, and recovery primary.",
+      "html": "<button class=\"ds-btn-primary\" type=\"button\">Take me home</button>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: none; border-radius: var(--radius); padding: 0 16px; min-height: 44px; font-family: var(--font); font-weight: 600; cursor: pointer; background: var(--primary); color: var(--on-primary); } .ds-btn-primary:hover:not(:disabled) { filter: brightness(1.08); } .ds-btn-primary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; } .ds-btn-primary:active:not(:disabled) { transform: translateY(1px); } .ds-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "White plate with a navy-mixed border for alternate actions.",
+      "html": "<button class=\"ds-btn-secondary\" type=\"button\">Cancel</button>",
+      "css": ".ds-btn-secondary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border-radius: var(--radius); padding: 0 16px; min-height: 44px; font-family: var(--font); font-weight: 600; cursor: pointer; background: var(--surface-lowest); color: var(--primary); border: 1px solid color-mix(in srgb, var(--primary) 45%, transparent); } .ds-btn-secondary:hover:not(:disabled) { background: var(--surface-low); } .ds-btn-secondary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; } .ds-btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }"
+    },
+    {
+      "name": "Ghost Back",
+      "kind": "button",
+      "refersTo": "button-ghost-back",
+      "description": "Recovery secondary: navy ghost, 600 weight, not a second fill.",
+      "html": "<button class=\"ds-btn-ghost-back\" type=\"button\">Go back</button>",
+      "css": ".ds-btn-ghost-back { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: none; border-radius: var(--radius); padding: 0 16px; min-height: 44px; font-family: var(--font); font-weight: 600; cursor: pointer; background: transparent; color: var(--navy); } .ds-btn-ghost-back:hover { background: var(--surface-container); } .ds-btn-ghost-back:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }"
+    },
+    {
+      "name": "Danger Button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Campus Red fill for destructive confirmations only.",
+      "html": "<button class=\"ds-btn-danger\" type=\"button\">Remove</button>",
+      "css": ".ds-btn-danger { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: none; border-radius: var(--radius); padding: 0 16px; min-height: 44px; font-family: var(--font); font-weight: 600; cursor: pointer; background: var(--error); color: var(--on-error); } .ds-btn-danger:hover:not(:disabled) { filter: brightness(1.08); } .ds-btn-danger:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; } .ds-btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "field",
+      "description": "Plate-white field with 12px corners; focus thickens the navy border.",
+      "html": "<label class=\"ds-field\"><span>Username</span><input type=\"text\" value=\"officer\" /></label>",
+      "css": ".ds-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-family: var(--font); } .ds-field > span { font-size: 13px; font-weight: 600; color: var(--on-surface-variant); letter-spacing: 0.01em; } .ds-field input { width: 100%; color: var(--on-surface); background: var(--surface-lowest); border: 1px solid var(--outline-variant); border-radius: var(--radius); padding: 12px 14px; font: inherit; } .ds-field input:focus { outline: none; border-color: var(--primary); border-width: 2px; padding: 11px 13px; } .ds-field input:focus-visible { outline: none; }"
+    },
+    {
+      "name": "Work Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Flat plate-white card with a navy-tinted 1px border; no resting shadow.",
+      "html": "<article class=\"ds-card\"><h3 class=\"ds-card-title\">Today's events</h3><p class=\"ds-card-body\">Morning assembly is open for IN scans.</p></article>",
+      "css": ".ds-card { background: var(--surface-lowest); border: 1px solid color-mix(in srgb, var(--navy) 12%, var(--outline-variant)); border-radius: var(--radius); padding: 18px 20px; font-family: var(--font); color: var(--on-surface); } .ds-card-title { margin: 0; font-family: var(--font-display); font-size: 1.125rem; font-weight: 600; color: var(--navy); } .ds-card-body { margin: 4px 0 0; color: var(--on-surface-variant); font-size: 13px; } .ds-card:focus-within { outline: 2px solid var(--primary); outline-offset: 2px; }"
+    },
+    {
+      "name": "Status Chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Tight 8px pill for draft, IN, OUT, and blocked states.",
+      "html": "<span class=\"ds-chip ds-chip-in\">IN</span>",
+      "css": ".ds-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; border-radius: 8px; font-family: var(--font); font-size: 12px; font-weight: 700; white-space: nowrap; } .ds-chip-in { background: color-mix(in srgb, var(--in) 16%, transparent); color: var(--in); } .ds-chip-out { background: color-mix(in srgb, var(--out) 16%, transparent); color: var(--out); } .ds-chip-draft { background: var(--primary-container); color: var(--on-primary-container); }"
+    },
+    {
+      "name": "Sidebar Nav Link",
+      "kind": "nav",
+      "refersTo": "nav-link",
+      "description": "14px / 600 navy-rail link; active is a 16% white wash.",
+      "html": "<nav class=\"ds-nav\"><a class=\"ds-nav-link\" href=\"#\">Events</a><a class=\"ds-nav-link ds-nav-link-active\" href=\"#\">Students</a></nav>",
+      "css": ".ds-nav { display: flex; flex-direction: column; gap: 2px; padding: 8px; background: var(--navy); border-radius: 12px; } .ds-nav-link { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; color: rgba(255, 255, 255, 0.82); font-family: var(--font); font-weight: 600; font-size: 14px; text-decoration: none; } .ds-nav-link:hover { background: rgba(255, 255, 255, 0.08); color: #fff; } .ds-nav-link-active { background: rgba(255, 255, 255, 0.16); color: #fff; } .ds-nav-link:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }"
+    },
+    {
+      "name": "Recovery Plate",
+      "kind": "custom",
+      "refersTo": "error-card",
+      "description": "Centered desk note: crest, serif headline, one sentence, navy primary, ghost back.",
+      "html": "<section class=\"ds-error-card\"><svg class=\"ds-error-crest\" viewBox=\"0 0 64 72\" aria-hidden=\"true\"><path fill=\"#23326b\" d=\"M32 2l26 8v22c0 18-12 32-26 38C18 64 6 50 6 32V10L32 2z\"/><path fill=\"#fff\" d=\"M32 14l14 28H18L32 14z\"/><path fill=\"#da1f28\" d=\"M32 30l6 12H26l6-12z\"/></svg><h1>This page isn't here</h1><p class=\"ds-error-body\">That address doesn't match a page in SSC QR Attendance. You can go back, or return home.</p><div class=\"ds-error-actions\"><button class=\"ds-btn-primary ds-error-primary\" type=\"button\">Take me home</button><button class=\"ds-btn-ghost-back\" type=\"button\">Go back</button></div></section>",
+      "css": ".ds-error-card { width: min(520px, 100%); display: flex; flex-direction: column; align-items: center; text-align: center; padding: 40px 36px 32px; background: #ffffff; color: #101d49; border: 1px solid color-mix(in srgb, var(--navy) 12%, var(--outline-variant)); border-radius: var(--radius); box-shadow: 0 8px 24px var(--shadow); font-family: var(--font); } .ds-error-crest { display: block; width: 112px; height: 112px; margin: 0 0 24px; } .ds-error-card h1 { margin: 0; font-family: var(--font-display); font-size: 2.25rem; font-weight: 600; letter-spacing: -0.02em; line-height: 1.15; color: var(--navy); max-width: 20ch; } .ds-error-body { margin: 12px 0 0; max-width: 36ch; font-size: 1.125rem; line-height: 1.45; color: #353535; } .ds-error-actions { width: min(420px, 100%); margin-top: 36px; display: flex; flex-direction: column; align-items: center; gap: 8px; } .ds-error-primary { width: 100%; } .ds-btn-primary { display: inline-flex; align-items: center; justify-content: center; border: none; border-radius: var(--radius); padding: 0 16px; min-height: 44px; font-family: var(--font); font-weight: 600; cursor: pointer; background: var(--primary); color: var(--on-primary); } .ds-btn-primary:hover:not(:disabled) { filter: brightness(1.08); } .ds-btn-primary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; } .ds-btn-ghost-back { display: inline-flex; align-items: center; justify-content: center; border: none; border-radius: var(--radius); padding: 0 16px; min-height: 44px; font-family: var(--font); font-weight: 600; cursor: pointer; background: transparent; color: var(--navy); } .ds-btn-ghost-back:hover { background: var(--surface-container); } .ds-btn-ghost-back:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }"
+    },
+    {
+      "name": "Login Plate",
+      "kind": "custom",
+      "refersTo": "login-card",
+      "description": "White door card on the navy stage; 160px crest and serif product title.",
+      "html": "<article class=\"ds-login-card\"><svg class=\"ds-login-crest\" viewBox=\"0 0 64 72\" aria-hidden=\"true\"><path fill=\"#23326b\" d=\"M32 2l26 8v22c0 18-12 32-26 38C18 64 6 50 6 32V10L32 2z\"/><path fill=\"#fff\" d=\"M32 14l14 28H18L32 14z\"/><path fill=\"#da1f28\" d=\"M32 30l6 12H26l6-12z\"/></svg><h1>SSC QR Attendance</h1><p class=\"ds-campus\">ACSSCO Bukidnon Campus</p><button class=\"ds-btn-primary ds-login-submit\" type=\"button\">Log in</button></article>",
+      "css": ".ds-login-card { width: min(440px, 100%); padding: 36px 32px 32px; background: #ffffff; color: var(--on-surface); border: 1px solid color-mix(in srgb, var(--navy) 14%, transparent); border-radius: var(--radius); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.95) inset, 0 28px 64px rgba(8, 12, 32, 0.42); font-family: var(--font); text-align: center; } .ds-login-crest { display: block; width: 160px; height: 160px; margin: 0 auto 24px; } .ds-login-card h1 { margin: 0; font-family: var(--font-display); font-size: 1.75rem; font-weight: 600; letter-spacing: -0.018em; line-height: 1.15; } .ds-campus { margin: 8px 0 0; color: var(--primary); font-size: 0.9375rem; font-weight: 600; letter-spacing: 0.02em; } .ds-login-submit { width: 100%; margin-top: 28px; } .ds-btn-primary { display: inline-flex; align-items: center; justify-content: center; border: none; border-radius: var(--radius); padding: 0 16px; min-height: 44px; font-family: var(--font); font-weight: 600; cursor: pointer; background: var(--primary); color: var(--on-primary); letter-spacing: 0.01em; } .ds-btn-primary:hover:not(:disabled) { filter: brightness(1.08); } .ds-btn-primary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; } .ds-btn-primary:active:not(:disabled) { transform: translateY(1px); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Official Work Desk",
+    "overview": "SSC QR Attendance is the ACSSCO Bukidnon staff console: a paper work surface with one institutional navy and the campus crest. Authenticated work sits in a navy sidebar beside a white content pane. Recovery is the same desk without the sidebar — one bordered card, the crest, a serif headline, and a short sentence. Login is the only full-bleed navy door; it is not the template for other full-page states.\n\nThe pairing is official without ceremony. Source Serif 4 carries titles; Source Sans 3 carries body, chrome, and actions. Corners are quietly rounded (12px on plates and primary actions). Status green and rust mark IN and OUT; campus red is reserved for true error, danger, and blocked states. Copy stays short and operational.\n\nStaff work, login, and recovery all lock to a light color scheme even when the OS is dark. New screens inherit that lock.",
+    "keyCharacteristics": [
+      "Paper-white work and recovery surfaces; navy is the spine and the primary action, not a second wallpaper",
+      "Source Serif 4 titles, Source Sans 3 everything else",
+      "The ACSSCO shield as the only identity image",
+      "Flat white cards with a navy-tinted 1px border; lift is for overlays and the two standalone plates (login, recovery)",
+      "44px primary actions; recovery stacks a full-width navy button over a navy ghost “Go back”"
+    ],
+    "rules": [
+      {
+        "name": "The Desk-Not-Door Rule",
+        "body": "Recovery and authenticated work sit on paper. Do not restage them on Navy Deep, login rays, or a washed-out crest wallpaper.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Navy Rule",
+        "body": "Campus Navy is the voice of titles and primary actions. It fills the sidebar. It does not flood work or recovery canvases.",
+        "section": "colors"
+      },
+      {
+        "name": "The Scarce Red Rule",
+        "body": "Campus Red marks failure, danger, and blocked — never the recovery card, never a decorative accent stripe.",
+        "section": "colors"
+      },
+      {
+        "name": "The Source Pair Rule",
+        "body": "Serif for named titles. Sans for chrome, body, buttons, and the sidebar. Do not set shell navigation in Source Serif 4.",
+        "section": "typography"
+      },
+      {
+        "name": "The Short Sentence Rule",
+        "body": "Empty states and recovery use one serif title and one calm sentence. No status codes, no stacked eyebrows, no display numerals as the message.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat Card Rule",
+        "body": "Work cards do not float. If a surface needs a shadow, it is an overlay or one of the two standalone plates.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do put work and recovery on paper-white plates with a 12px navy-tinted border and Source Serif 4 titles in Campus Navy.",
+      "Do use one navy primary and one ghost back on recovery; keep the primary 44px and full-width in the actions column.",
+      "Do show the ACSSCO crest as a real mark (login 160px, recovery 112px, sidebar 40px).",
+      "Do speak errors in one short sentence, then offer a next step (Home if signed in, Log in if not, Try again on crash, Go back always).",
+      "Do lock staff work, login, and recovery to a light color scheme."
+    ],
+    "donts": [
+      "Don't clone the navy login stage (deep fill, rays, giant faded crest) onto recovery or authenticated pages.",
+      "Don't lead recovery with a giant 404, a status code, or Campus Red.",
+      "Don't set shell chrome or body copy in Source Serif 4.",
+      "Don't float ordinary work cards; reserve shadows for overlays, login, and recovery.",
+      "Don't invent a second logo or replace the crest with a generic mark."
+    ]
+  }
+}

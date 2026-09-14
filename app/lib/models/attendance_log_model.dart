@@ -1,3 +1,5 @@
+import '../core/utils/json_values.dart';
+
 class AttendanceLogModel {
   const AttendanceLogModel({
     required this.id,
@@ -11,6 +13,8 @@ class AttendanceLogModel {
     this.deviceNote,
     this.studentIdCode,
     this.studentName,
+    this.course,
+    this.yearLevel,
     this.studentSection,
     this.sessionLabel,
     this.scannedByName,
@@ -34,6 +38,8 @@ class AttendanceLogModel {
   // Joined display fields
   final String? studentIdCode;
   final String? studentName;
+  final String? course;
+  final int? yearLevel;
   final String? studentSection;
   final String? sessionLabel;
   final String? scannedByName;
@@ -57,6 +63,8 @@ class AttendanceLogModel {
         deviceNote: json['device_note'] as String?,
         studentIdCode: json['student_id_code'] as String?,
         studentName: json['student_name'] as String?,
+        course: json['course'] as String?,
+        yearLevel: asInt(json['year_level']),
         studentSection: json['student_section'] as String?,
         sessionLabel: json['session_label'] as String?,
         scannedByName: json['scanned_by_name'] as String?,

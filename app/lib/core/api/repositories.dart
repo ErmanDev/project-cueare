@@ -2,10 +2,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/attendance_log_model.dart';
 import '../../models/event_model.dart';
+import '../../models/event_participant_model.dart';
 import '../../models/scan_preview_model.dart';
+import '../../models/section_model.dart';
 import '../../models/session_window_model.dart';
+import '../../models/student_event_model.dart';
+import '../../models/student_fine_model.dart';
 import '../../models/student_model.dart';
 import '../../models/user_model.dart';
+import '../utils/json_values.dart';
 import 'api_client.dart';
 import 'api_endpoints.dart';
 
@@ -41,6 +46,13 @@ class AdminRepository {
     return UserModel.fromJson(json);
   }
 
+  Future<UserModel> promoteStudentToModerator(int studentId) async {
+    final json = await _api.postJson(ApiEndpoints.moderatorsFromStudent, {
+      'student_id': studentId,
+    });
+    return UserModel.fromJson(json);
+  }
+
   Future<UserModel> updateModerator(
     int id, {
     String? name,
@@ -58,6 +70,10 @@ class AdminRepository {
   Future<void> deleteModerator(int id) =>
       _api.delete(ApiEndpoints.moderator(id));
 
+  Future<void> demoteModerator(int id) async {
+    await _api.postJson(ApiEndpoints.moderatorDemote(id), {});
+  }
+
   // Students
   Future<List<StudentModel>> students({String? query}) async {
     final list = await _api.getList(
@@ -67,6 +83,98 @@ class AdminRepository {
     return list
         .map((e) => StudentModel.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  Future<({List<StudentModel> students, int total})> studentsPage({
+    String? query,
+    int page = 1,
+    int perPage = 50,
+  }) async {
+    final json = await _api.getJson(ApiEndpoints.students, query: {
+      if (query != null && query.isNotEmpty) 'q': query,
+      'page': page,
+      'per_page': perPage,
+    });
+    final list = (json['students'] as List<dynamic>? ?? [])
+        .map((e) => StudentModel.fromJson(e as Map<String, dynamic>))
+        .toList();
+    return (students: list, total: asInt(json['total']) ?? list.length);
+  }
+
+  Future<List<SectionModel>> sections({String? query}) async {
+    final list = await _api.getList(
+      ApiEndpoints.sections,
+      query: query == null || query.isEmpty ? null : {'q': query},
+    );
+    return list
+        .map((e) => SectionModel.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<SectionBreakdown> section(int id) async =>
+      SectionBreakdown.fromJson(await _api.getJson(ApiEndpoints.section(id)));
+
+  Future<({List<EventParticipantModel> rows, int total})> eventParticipants(
+    int eventId, {
+    String? query,
+    int limit = 200,
+  }) async {
+    final json = await _api.getJson(
+      ApiEndpoints.eventParticipants(eventId),
+      query: {
+        if (query != null && query.isNotEmpty) 'q': query,
+        'limit': limit,
+      },
+    );
+    final rows = (json['rows'] as List<dynamic>? ?? [])
+        .map((e) => EventParticipantModel.fromJson(e as Map<String, dynamic>))
+        .toList();
+    return (rows: rows, total: asInt(json['total']) ?? rows.length);
+  }
+
+  Future<({int addedCount, int total})> addEventParticipants(
+    int eventId, {
+    List<int>? studentIds,
+    int? sectionId,
+  }) async {
+    final json = await _api.postJson(ApiEndpoints.eventParticipants(eventId), {
+      if (studentIds != null && studentIds.isNotEmpty) 'student_ids': studentIds,
+      if (sectionId != null) 'section_id': sectionId,
+    });
+    return (
+      addedCount: asInt(json['added_count']) ?? 0,
+      total: asInt(json['total_participants']) ?? 0,
+    );
+  }
+
+  Future<void> removeEventParticipant(int eventId, int studentId) =>
+      _api.delete(ApiEndpoints.eventParticipant(eventId, studentId));
+
+  Future<int> syncEventRoster(int eventId) async {
+    final json = await _api.postJson(
+      ApiEndpoints.eventParticipantsSync(eventId),
+      {},
+    );
+    return asInt(json['participant_count']) ?? 0;
+  }
+
+  Future<List<EventParticipantTokenModel>> generateEventTokens(
+    int eventId,
+  ) async {
+    final json = await _api.postJson(ApiEndpoints.eventTokens(eventId), {});
+    return (json['tokens'] as List<dynamic>? ?? [])
+        .map(
+          (e) => EventParticipantTokenModel.fromJson(e as Map<String, dynamic>),
+        )
+        .toList();
+  }
+
+  Future<void> revokeEventToken(int eventId, int tokenId) async {
+    await _api.postJson(ApiEndpoints.eventTokenRevoke(eventId, tokenId), {});
+  }
+
+  Future<void> reissueEventToken(int eventId, int tokenId) async {
+    await _api.postJson(ApiEndpoints.eventTokenReissue(eventId, tokenId), {});
   }
 
   Future<StudentModel> createStudent({
@@ -377,20 +485,31 @@ class StudentRepository {
   StudentRepository(this._api);
   final ApiClient _api;
 
+  Future<List<StudentEventModel>> myEvents() async {
+    final json = await _api.getJson(ApiEndpoints.studentEvents);
+    return (json['events'] as List<dynamic>? ?? [])
+        .map((e) => StudentEventModel.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<StudentEventQrModel> myEventQr(int eventId) async {
+    final json = await _api.getJson(ApiEndpoints.studentEventQr(eventId));
+    return StudentEventQrModel.fromJson(json);
+  }
+
+  Future<List<StudentFineModel>> myFines() async {
+    final json = await _api.getJson(ApiEndpoints.studentFines);
+    return (json['fines'] as List<dynamic>? ?? [])
+        .map((e) => StudentFineModel.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
   Future<StudentModel> myQr(String code) async {
     final json = await _api.getJson(ApiEndpoints.studentQr(code));
     final student = StudentModel.fromJson(
       json['student'] as Map<String, dynamic>,
     );
-    return StudentModel(
-      id: student.id,
-      studentIdCode: student.studentIdCode,
-      fullName: student.fullName,
-      section: student.section,
-      photoUrl: student.photoUrl,
-      qrPayload: json['qr_payload'] as String?,
-      createdAt: student.createdAt,
-    );
+    return student.copyWith(qrPayload: json['qr_payload'] as String?);
   }
 
   Future<List<AttendanceLogModel>> myAttendance(String code) async {

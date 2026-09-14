@@ -1,4 +1,5 @@
 import { titleCaseName } from '../students/roster.ts';
+import { ROLES } from '../types.ts';
 import { isPastDate } from './time.ts';
 
 export function toIso(value: Date | string | null | undefined): string | null {
@@ -36,6 +37,7 @@ export function studentToApi(row: {
   year_level?: number | string | null;
   section: string | null;
   photo_url: string | null;
+  user_id?: number | null;
   created_at: Date;
   updated_at: Date;
 }): Record<string, unknown> {
@@ -57,6 +59,32 @@ export function studentToApi(row: {
     year_level: Number.isFinite(yearLevel) ? yearLevel : null,
     section: row.section,
     photo_url: row.photo_url,
+    user_id: row.user_id ?? null,
+    created_at: toIso(row.created_at),
+    updated_at: toIso(row.updated_at),
+  };
+}
+
+export function studentAsUser(row: {
+  id: number;
+  student_id_code: string;
+  first_name?: string | null;
+  middle_name?: string | null;
+  last_name?: string | null;
+  full_name: string;
+  created_at: Date;
+  updated_at: Date;
+}): Record<string, unknown> {
+  const firstName = titleCaseName(row.first_name);
+  const middleName = titleCaseName(row.middle_name) || null;
+  const lastName = titleCaseName(row.last_name);
+  const fullName =
+    [firstName, middleName, lastName].filter(Boolean).join(' ') || titleCaseName(row.full_name);
+  return {
+    id: row.id,
+    name: fullName,
+    username: row.student_id_code,
+    role: ROLES.student,
     created_at: toIso(row.created_at),
     updated_at: toIso(row.updated_at),
   };

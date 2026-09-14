@@ -11,6 +11,7 @@ import '../../../widgets/status_chip.dart';
 import '../admin_providers.dart';
 import '../attendance/attendance_screen.dart';
 import 'event_form_screen.dart';
+import 'event_roster_screen.dart';
 import 'session_window_editor.dart';
 
 class EventsScreen extends ConsumerWidget {
@@ -30,6 +31,24 @@ class EventsScreen extends ConsumerWidget {
           .read(adminRepositoryProvider)
           .updateEvent(e.id, isActive: !e.isActive);
       ref.invalidate(eventsProvider);
+    } catch (err) {
+      if (context.mounted) showErrorSnack(context, err);
+    }
+  }
+
+  Future<void> _syncRoster(
+    BuildContext context,
+    WidgetRef ref,
+    EventModel e,
+  ) async {
+    try {
+      final count = await ref
+          .read(adminRepositoryProvider)
+          .syncEventRoster(e.id);
+      ref.invalidate(eventsProvider);
+      if (context.mounted) {
+        showSnack(context, 'Synced roster · $count participants');
+      }
     } catch (err) {
       if (context.mounted) showErrorSnack(context, err);
     }
@@ -128,6 +147,10 @@ class EventsScreen extends ConsumerWidget {
                               StatusChip.today(),
                               const SizedBox(width: 6),
                             ],
+                            if (e.isExpired) ...[
+                              StatusChip.expired(),
+                              const SizedBox(width: 6),
+                            ],
                             StatusChip.active(e.isActive),
                             PopupMenuButton<String>(
                               onSelected: (v) {
@@ -137,6 +160,10 @@ class EventsScreen extends ConsumerWidget {
                                       context,
                                       EventFormScreen(existing: e),
                                     );
+                                  case 'roster':
+                                    _open(context, EventRosterScreen(event: e));
+                                  case 'sync':
+                                    _syncRoster(context, ref, e);
                                   case 'toggle':
                                     _toggleActive(context, ref, e);
                                   case 'attendance':
@@ -157,6 +184,14 @@ class EventsScreen extends ConsumerWidget {
                                 const PopupMenuItem(
                                   value: 'edit',
                                   child: Text('Edit event & sessions'),
+                                ),
+                                const PopupMenuItem(
+                                  value: 'roster',
+                                  child: Text('Manage roster'),
+                                ),
+                                const PopupMenuItem(
+                                  value: 'sync',
+                                  child: Text('Sync roster'),
                                 ),
                                 PopupMenuItem(
                                   value: 'toggle',
@@ -180,6 +215,32 @@ class EventsScreen extends ConsumerWidget {
                         ),
                         const SizedBox(height: 10),
                         SessionWindowChips(windows: e.sessionWindows),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.groups_outlined,
+                              size: 16,
+                              color: scheme.onSurfaceVariant,
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                '${e.participantCount} participant'
+                                '${e.participantCount == 1 ? '' : 's'}',
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(color: scheme.onSurfaceVariant),
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: () => _open(
+                                context,
+                                EventRosterScreen(event: e),
+                              ),
+                              child: const Text('Roster'),
+                            ),
+                          ],
+                        ),
                       ],
                     ),
                   ),

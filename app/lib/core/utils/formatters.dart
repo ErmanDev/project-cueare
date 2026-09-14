@@ -25,4 +25,19 @@ abstract class Fmt {
 
   static String hhmmRange(String start, String end) =>
       '${hhmm(start)} – ${hhmm(end)}';
+
+  /// `1` → `1st Year`
+  static String yearLevel(int? level) {
+    if (level == null) return '—';
+    final teens = level % 100;
+    final suffix = teens >= 11 && teens <= 13
+        ? 'th'
+        : switch (level % 10) {
+            1 => 'st',
+            2 => 'nd',
+            3 => 'rd',
+            _ => 'th',
+          };
+    return '$level$suffix Year';
+  }
 }

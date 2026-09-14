@@ -55,9 +55,14 @@ export const openApiDocument = {
           id: { type: 'integer' },
           name: { type: 'string' },
           username: { type: 'string' },
-          role: { type: 'string', enum: ['superadmin', 'moderator'] },
+          role: { type: 'string', enum: ['superadmin', 'moderator', 'student'] },
           created_at: { type: 'string', format: 'date-time' },
           updated_at: { type: 'string', format: 'date-time' },
+          student_id: {
+            type: 'integer',
+            nullable: true,
+            description: 'Set when this moderator was promoted from a student',
+          },
         },
       },
       Student: {
@@ -73,6 +78,11 @@ export const openApiDocument = {
           year_level: { type: 'integer', nullable: true, example: 1 },
           section: { type: 'string', nullable: true },
           photo_url: { type: 'string', nullable: true },
+          user_id: {
+            type: 'integer',
+            nullable: true,
+            description: 'Linked staff user when this student is also a moderator',
+          },
           created_at: { type: 'string', format: 'date-time' },
           updated_at: { type: 'string', format: 'date-time' },
           qr_payload: { type: 'string', description: 'Value encoded in the student QR' },
@@ -187,16 +197,26 @@ export const openApiDocument = {
         type: 'object',
         required: ['username', 'password'],
         properties: {
-          username: { type: 'string', example: 'admin' },
-          password: { type: 'string', example: 'changeme123' },
+          username: {
+            type: 'string',
+            example: 'admin',
+            description: 'Staff username or student ID',
+          },
+          password: {
+            type: 'string',
+            example: 'changeme123',
+            description:
+              'Staff password, or the student ID for student login',
+          },
         },
       },
       LoginResponse: {
         type: 'object',
         properties: {
           token: { type: 'string' },
-          role: { type: 'string', enum: ['superadmin', 'moderator'] },
+          role: { type: 'string', enum: ['superadmin', 'moderator', 'student'] },
           user: { $ref: '#/components/schemas/User' },
+          student: { $ref: '#/components/schemas/Student' },
           expires_in_hours: { type: 'integer', example: 12 },
         },
       },
@@ -274,6 +294,35 @@ export const openApiDocument = {
           },
           '429': {
             description: 'RATE_LIMITED — too many login attempts',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+        },
+      },
+    },
+    '/auth/change-password': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Change the signed-in student password',
+        security: bearer,
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['current_password', 'new_password'],
+                properties: {
+                  current_password: { type: 'string' },
+                  new_password: { type: 'string', minLength: 4 },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'Password updated' },
+          '400': {
+            description: 'Current password is wrong, or new password is too short',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
           },
         },
@@ -1357,6 +1406,52 @@ export const openApiDocument = {
         },
       },
     },
+    '/admin/moderators/from-student': {
+      post: {
+        tags: ['Admin — Moderators'],
+        summary: 'Promote a student to moderator',
+        security: bearer,
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['student_id'],
+                properties: {
+                  student_id: { type: 'integer' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Created from student',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/User' } } },
+          },
+          '409': {
+            description: 'Student already a moderator, or student ID is taken',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+        },
+      },
+    },
+    '/admin/moderators/{id}/demote': {
+      parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+      post: {
+        tags: ['Admin — Moderators'],
+        summary: 'Demote a promoted student back to student',
+        security: bearer,
+        responses: {
+          '200': { description: 'Demoted' },
+          '400': {
+            description: 'Not promoted from a student',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+        },
+      },
+    },
     '/admin/moderators/{id}': {
       parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
       get: {
@@ -1748,6 +1843,38 @@ export const openApiDocument = {
             description: 'RATE_LIMITED',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
           },
+        },
+      },
+    },
+    '/student/me/events': {
+      get: {
+        tags: ['Student'],
+        summary: 'Events the signed-in student is registered for',
+        security: bearer,
+        responses: {
+          '200': { description: 'Registered events with session check-in status' },
+        },
+      },
+    },
+    '/student/me/fines': {
+      get: {
+        tags: ['Student'],
+        summary: 'Fines for the signed-in student, grouped by event on the client',
+        security: bearer,
+        responses: {
+          '200': { description: 'Student fine assessments' },
+        },
+      },
+    },
+    '/student/me/events/{eventId}/qr': {
+      get: {
+        tags: ['Student'],
+        summary: 'Generate the event QR for the signed-in student',
+        security: bearer,
+        parameters: [{ name: 'eventId', in: 'path', required: true, schema: { type: 'integer' } }],
+        responses: {
+          '200': { description: 'Event QR token' },
+          '409': { description: 'Event is not active' },
         },
       },
     },

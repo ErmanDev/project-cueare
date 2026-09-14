@@ -10,9 +10,6 @@ void main() {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(
     ProviderScope(
-      // Riverpod 3 retries failing providers with back-off by default and
-      // reports "loading" meanwhile. We want the "server unreachable"
-      // error to show immediately with a Retry button instead.
       retry: (_, _) => null,
       child: const SscAttendanceApp(),
     ),

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/auth/auth_state.dart';
-import '../../core/config/server_settings.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
 import '../../models/event_model.dart';
@@ -10,7 +9,6 @@ import '../../widgets/async_value_widget.dart';
 import '../../widgets/page_scaffold.dart';
 import '../../widgets/section_header.dart';
 import '../../widgets/status_chip.dart';
-import '../auth/server_config_screen.dart';
 import '../superadmin/events/session_window_editor.dart';
 import 'moderator_providers.dart';
 import 'my_scans_history_screen.dart';
@@ -23,7 +21,6 @@ class ModeratorDashboardScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final user = ref.watch(currentUserProvider);
-    final server = ref.watch(serverSettingsProvider).value;
     final events = ref.watch(activeEventsProvider);
     final selected = ref.watch(selectedEventProvider);
     final scheme = Theme.of(context).colorScheme;
@@ -36,15 +33,6 @@ class ModeratorDashboardScreen extends ConsumerWidget {
             tooltip: 'Refresh events',
             icon: const Icon(Icons.refresh),
             onPressed: () => ref.invalidate(activeEventsProvider),
-          ),
-          IconButton(
-            tooltip: 'Server settings',
-            icon: const Icon(Icons.settings_ethernet),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => const ServerConfigScreen(canPop: true),
-              ),
-            ),
           ),
           IconButton(
             tooltip: 'Sign out',
@@ -94,7 +82,9 @@ class ModeratorDashboardScreen extends ConsumerWidget {
                             style: Theme.of(context).textTheme.titleMedium,
                           ),
                           Text(
-                            server?.display ?? 'Server not set',
+                            user?.username != null
+                                ? '@${user!.username}'
+                                : 'ACSSCO Bukidnon',
                             style: Theme.of(context).textTheme.bodySmall
                                 ?.copyWith(color: scheme.onSurfaceVariant),
                           ),

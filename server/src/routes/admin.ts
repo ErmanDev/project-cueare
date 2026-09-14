@@ -993,11 +993,19 @@ adminRouter.delete(
 
 // --- moderators ---
 
+function moderatorToApi(
+  row: Parameters<typeof userToApi>[0],
+  studentId: number | null = null,
+): Record<string, unknown> {
+  return { ...userToApi(row), student_id: studentId };
+}
+
 adminRouter.get(
   '/moderators',
   asyncHandler(async (_req, res) => {
     const rows = await q.listModerators(getPool());
-    res.json(rows.map(userToApi));
+    const links = await q.listLinkedStudentIdsByUser(getPool());
+    res.json(rows.map((u) => moderatorToApi(u, links.get(u.id) ?? null)));
   }),
 );
 
@@ -1020,13 +1028,70 @@ adminRouter.post(
   }),
 );
 
+adminRouter.post(
+  '/moderators/from-student',
+  asyncHandler(async (req, res) => {
+    const body = jsonObject(req);
+    const studentId = requireInt(body, 'student_id');
+    const created = await withTransaction(getPool(), async (db) => {
+      const student = await q.getStudentById(db, studentId);
+      if (!student) throw notFound('Student not found');
+      if (student.user_id) {
+        const linked = await q.getUserById(db, student.user_id);
+        if (!linked) throw notFound('Student login account is missing');
+        if (linked.role === 'moderator') throw conflict('This student is already a moderator');
+        const user = await q.updateUser(db, linked.id, {
+          role: 'moderator',
+          name: student.full_name,
+        });
+        return { user, studentId: student.id };
+      }
+      const exists = await q.getUserByUsername(db, student.student_id_code);
+      if (exists) {
+        if (exists.role === 'moderator') {
+          throw conflict('A user with this student ID already exists');
+        }
+        await q.linkStudentToUser(db, student.id, exists.id);
+        const user = await q.updateUser(db, exists.id, {
+          role: 'moderator',
+          name: student.full_name,
+        });
+        return { user, studentId: student.id };
+      }
+      const user = await q.insertUser(db, {
+        name: student.full_name,
+        username: student.student_id_code,
+        passwordHash: hashPassword(student.student_id_code),
+        role: 'moderator',
+      });
+      await q.linkStudentToUser(db, student.id, user.id);
+      return { user, studentId: student.id };
+    });
+    res.status(201).json(moderatorToApi(created.user, created.studentId));
+  }),
+);
+
 adminRouter.get(
   '/moderators/:id',
   asyncHandler(async (req, res) => {
     const id = parsePathId(req.params.id);
     const existing = await q.getModeratorById(getPool(), id);
     if (!existing) throw notFound('Moderator not found');
-    res.json(userToApi(existing));
+    const linked = await q.getStudentByUserId(getPool(), id);
+    res.json(moderatorToApi(existing, linked?.id ?? null));
+  }),
+);
+
+adminRouter.post(
+  '/moderators/:id/demote',
+  asyncHandler(async (req, res) => {
+    const id = parsePathId(req.params.id);
+    const existing = await q.getModeratorById(getPool(), id);
+    if (!existing) throw notFound('Moderator not found');
+    const linked = await q.getStudentByUserId(getPool(), id);
+    if (!linked) throw badRequest('This moderator was not promoted from a student');
+    await q.updateUser(getPool(), id, { role: 'student' });
+    res.json({ student_id: linked.id });
   }),
 );
 
@@ -1068,7 +1133,10 @@ adminRouter.delete(
           'be deleted. Change their password to revoke access instead.',
       );
     }
-    await q.deleteUser(getPool(), id);
+    await withTransaction(getPool(), async (db) => {
+      await q.unlinkStudentsFromUser(db, id);
+      await q.deleteUser(db, id);
+    });
     res.status(204).end();
   }),
 );

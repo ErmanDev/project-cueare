@@ -162,7 +162,7 @@ class _StudentsScreenState extends ConsumerState<StudentsScreen> {
                     subtitle: Text(
                       [
                         s.studentIdCode,
-                        if (s.section != null) s.section!,
+                        if (s.programLine.isNotEmpty) s.programLine,
                       ].join(' · '),
                     ),
                     trailing: Row(

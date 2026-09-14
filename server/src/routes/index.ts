@@ -41,6 +41,7 @@ export function mountRestApi(app: Express, prefix = ''): void {
   app.get(`${p}/health`, health);
   app.post(`${p}/auth/login`, authRouter.login);
   app.get(`${p}/auth/me`, ...authRouter.me);
+  app.post(`${p}/auth/change-password`, ...authRouter.changePassword);
 
   // Published templates for events / anonymous clients
   app.get(
