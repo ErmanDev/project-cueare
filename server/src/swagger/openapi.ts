@@ -1817,5 +1817,164 @@ export const openApiDocument = {
         },
       },
     },
+    '/admin/event-sessions/{id}/qr-tokens': {
+      post: {
+        tags: ['Admin — Events'],
+        summary: 'Issue Event Session QR Token',
+        security: bearer,
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+            description: 'eventSessionId',
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  actionCode: { type: 'string', enum: ['IN', 'OUT', 'AUTO'], default: 'IN' },
+                  validForSeconds: { type: 'integer', default: 60 },
+                  overlapSeconds: { type: 'integer', default: 5 },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'QR token issued',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    eventSessionQrTokenId: { type: 'string' },
+                    eventSessionId: { type: 'string' },
+                    actionCode: { type: 'string' },
+                    validFromUtc: { type: 'string', format: 'date-time' },
+                    expiresAtUtc: { type: 'string', format: 'date-time' },
+                    qrValue: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/admin/event-session-qr-tokens/{id}/revoke': {
+      post: {
+        tags: ['Admin — Events'],
+        summary: 'Revoke Event Session QR Token',
+        security: bearer,
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+            description: 'eventSessionQrTokenId',
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['reason'],
+                properties: {
+                  reason: { type: 'string', example: 'Displayed in wrong venue' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '204': { description: 'QR token revoked successfully' },
+        },
+      },
+    },
+    '/admin/student-user-links': {
+      post: {
+        tags: ['Admin — Students'],
+        summary: 'Link User account to Student record',
+        security: bearer,
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['userId', 'studentId'],
+                properties: {
+                  userId: { type: 'integer' },
+                  studentId: { type: 'integer' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'User linked to student successfully' },
+        },
+      },
+    },
+    '/attendance/event-qr/self-scan': {
+      post: {
+        tags: ['Student'],
+        summary: 'Student Self-Scan Event QR Code',
+        security: bearer,
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['qrToken'],
+                properties: {
+                  qrToken: { type: 'string', description: 'Raw QR token string displayed at event venue' },
+                  clientRequestId: { type: 'string', format: 'uuid', description: 'Idempotency UUID for scan request' },
+                  clientFingerprint: { type: 'string', description: 'Optional device/browser fingerprint' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Self-scan result',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    scanResultCode: { type: 'string', enum: ['ACCEPTED', 'NO_CHANGE', 'REJECTED'] },
+                    failureReasonCode: { type: 'string', nullable: true },
+                    eventId: { type: 'string', nullable: true },
+                    eventName: { type: 'string', nullable: true },
+                    eventSessionId: { type: 'string', nullable: true },
+                    sessionName: { type: 'string', nullable: true },
+                    studentId: { type: 'string', nullable: true },
+                    studentNumber: { type: 'string', nullable: true },
+                    studentFullName: { type: 'string', nullable: true },
+                    actionRecorded: { type: 'string', nullable: true },
+                    attendanceStatus: { type: 'string', nullable: true },
+                    recordedAtUtc: { type: 'string', format: 'date-time' },
+                    message: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
   },
 };

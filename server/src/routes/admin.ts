@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { Router, type Request } from 'express';
 
 import { AttendanceService } from '../attendance/service.ts';
@@ -403,6 +404,27 @@ adminRouter.post(
       expectedDirection: DIRECTION.in,
       allowLateManualCheckIn: true,
       deviceNote: `Manual check-in: ${reason}`,
+    });
+    const detail = await q.getAttendanceDetail(getPool(), log.id);
+    res.status(201).json(attendanceDetailToApi(detail!));
+  }),
+);
+
+adminRouter.post(
+  '/events/:id/attendance/check-out',
+  asyncHandler(async (req, res) => {
+    const eventId = parsePathId(req.params.id);
+    const body = jsonObject(req);
+    const reason = requireString(body, 'reason');
+    if (reason.length > 175) throw badRequest('reason must be 175 characters or fewer');
+    const log = await service(req).confirm({
+      eventId,
+      studentId: requireInt(body, 'student_id'),
+      sessionWindowId: requireInt(body, 'session_window_id'),
+      scannedBy: req.auth!.id,
+      expectedDirection: DIRECTION.out,
+      allowLateManualCheckOut: true,
+      deviceNote: `Manual check-out: ${reason}`,
     });
     const detail = await q.getAttendanceDetail(getPool(), log.id);
     res.status(201).json(attendanceDetailToApi(detail!));
@@ -2105,3 +2127,73 @@ adminRouter.put(
     res.json(updated);
   }),
 );
+
+adminRouter.post(
+  '/event-sessions/:id/qr-tokens',
+  asyncHandler(async (req, res) => {
+    const eventSessionId = parsePathId(req.params.id);
+    const body = jsonObject(req);
+    const actionCode = (optionalString(body, 'actionCode') ?? optionalString(body, 'action_code') ?? 'IN').toUpperCase();
+    const validForSeconds = optionalInt(body, 'validForSeconds') ?? optionalInt(body, 'valid_for_seconds') ?? 60;
+    const overlapSeconds = optionalInt(body, 'overlapSeconds') ?? optionalInt(body, 'overlap_seconds') ?? 5;
+    const actorUserId = req.auth?.id ?? 1;
+
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(rawToken).digest();
+
+    const issued = await q.issueEventSessionQrToken(getPool(), {
+      eventSessionId,
+      actionCode,
+      tokenHash,
+      validForSeconds,
+      overlapSeconds,
+      actorUserId,
+    });
+
+    res.status(201).json({
+      eventSessionQrTokenId: String(issued.eventSessionQrTokenId),
+      eventSessionId: String(issued.eventSessionId),
+      actionCode: issued.actionCode,
+      validFromUtc: issued.validFromUtc,
+      expiresAtUtc: issued.expiresAtUtc,
+      qrValue: rawToken,
+    });
+  }),
+);
+
+adminRouter.post(
+  '/event-session-qr-tokens/:id/revoke',
+  asyncHandler(async (req, res) => {
+    const eventSessionQrTokenId = parsePathId(req.params.id);
+    const body = jsonObject(req);
+    const reason = requireString(body, 'reason');
+    const actorUserId = req.auth?.id ?? 1;
+
+    await q.revokeEventSessionQrToken(getPool(), {
+      eventSessionQrTokenId,
+      reason,
+      actorUserId,
+    });
+
+    res.status(204).send();
+  }),
+);
+
+adminRouter.post(
+  '/student-user-links',
+  asyncHandler(async (req, res) => {
+    const body = jsonObject(req);
+    const userId = requireInt(body, 'userId');
+    const studentId = requireInt(body, 'studentId');
+    const actorUserId = req.auth?.id ?? 1;
+
+    await q.linkUserToStudent(getPool(), {
+      userId,
+      studentId,
+      linkedByUserId: actorUserId,
+    });
+
+    res.json({ status: 'ok', userId, studentId });
+  }),
+);
+

@@ -283,6 +283,28 @@ describe('AttendanceService', () => {
     }), { statusCode: 409 });
   });
 
+  it('records an admin manual check-out after a check-in', async () => {
+    if (!dbReady) return;
+    fakeNow = new Date(2026, 8, 5, 8, 30);
+    await service.confirm({
+      eventId, studentId, sessionWindowId: morningId, scannedBy: adminId,
+      expectedDirection: DIRECTION.in, allowLateManualCheckIn: true,
+      deviceNote: 'Manual check-in: In person',
+    });
+    fakeNow = new Date(2026, 8, 5, 11, 45);
+    const checkOut = await service.confirm({
+      eventId, studentId, sessionWindowId: morningId, scannedBy: adminId,
+      expectedDirection: DIRECTION.out, allowLateManualCheckOut: true,
+      deviceNote: 'Manual check-out: In person',
+    });
+    expect(checkOut.direction).toBe(DIRECTION.out);
+    expect(checkOut.scanned_by).toBe(adminId);
+    expect(checkOut.device_note).toBe('Manual check-out: In person');
+    const summary = await q.getEventAttendanceSummary(pool, eventId);
+    expect(summary.checked_in).toBe(1);
+    expect(summary.sessions[0]?.checked_out).toBe(1);
+  });
+
   it('links one registration and QR pass to a participant in every session', async () => {
     if (!dbReady) return;
     await q.updateEvent(pool, eventId, { eventEndDate: new Date(2026, 8, 6) });
@@ -652,6 +674,7 @@ describe('AttendanceService', () => {
         studentId,
         sessionWindowId: afternoonId,
         scannedBy: moderatorId,
+        allowLateManualCheckIn: true,
       });
       const status = await pool.query(
         'SELECT "attendanceStatusCode" FROM "AttendanceSessionStatus" WHERE "eventSessionId" = $1 AND "studentId" = $2',

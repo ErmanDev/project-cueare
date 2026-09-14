@@ -1,11 +1,24 @@
 import { useEffect, useState } from 'react'
-import { Pencil, Plus, Trash2 } from 'lucide-react'
+import { Pencil, Plus, Search, Trash2 } from 'lucide-react'
 
 import { Button, CardListSkeleton, EmptyState, Field, FormActions, Modal, onSubmit } from '../../components/ui'
 import { api } from '../../lib/api'
 import { initial } from '../../lib/format'
 import { useToast } from '../../lib/toast'
 import type { User } from '../../lib/types'
+
+type Student = {
+  id: number
+  student_id_code?: string | null
+  full_name: string
+  section?: string | null
+  user_id?: number | null
+}
+
+type StudentPage = {
+  students: Student[]
+  total: number
+}
 
 export function AdminModerators() {
   const { toast } = useToast()
@@ -28,13 +41,7 @@ export function AdminModerators() {
   }, [])
 
   async function remove(m: User) {
-    if (
-      !window.confirm(
-        `Delete ${m.name}? Moderators who have already scanned cannot be deleted — reset their password instead.`,
-      )
-    ) {
-      return
-    }
+    if (!window.confirm(`Delete moderator "${m.name}"?`)) return
     try {
       await api.delete(`/admin/moderators/${m.id}`)
       toast('Moderator deleted')
@@ -49,42 +56,52 @@ export function AdminModerators() {
       <div className="page-head">
         <div>
           <h2>Moderators</h2>
-          <p>Accounts that scan attendance</p>
+          <p>Users who can scan attendance and manage sessions.</p>
         </div>
         <Button onClick={() => setForm('new')}>
           <Plus size={18} /> Add moderator
         </Button>
       </div>
+
       {error ? <p className="error-text">{error}</p> : null}
-      {list === null && !error ? (
-        <CardListSkeleton label="Loading moderators" />
-      ) : list && list.length === 0 ? (
+
+      {list === null ? (
+        <CardListSkeleton label="Loading moderators" count={3} />
+      ) : list.length === 0 ? (
         <EmptyState
           title="No moderators yet"
-          subtitle="Promote a student, or create a special ID and password."
+          subtitle="Add a moderator to let them scan attendance."
         />
       ) : (
-        <div className="list">
-          {(list ?? []).map((m) => (
-            <article key={m.id} className="card row">
-              <div className="avatar">{initial(m.name)}</div>
-              <div className="grow">
-                <strong>{m.name}</strong>
+        <div className="mod-grid">
+          {list.map((m) => (
+            <article key={m.id} className="card mod-card">
+              <div className="mod-avatar">{initial(m.name)}</div>
+              <div className="mod-info">
+                <h3>{m.name}</h3>
                 <p className="muted">@{m.username}</p>
               </div>
-              <button className="icon-btn" title="Edit" onClick={() => setForm(m)}>
-                <Pencil size={16} />
+              <button className="icon-btn edit-btn" title="Edit" onClick={() => setForm(m)}>
+                <Pencil size={18} />
               </button>
-              <button className="icon-btn" title="Delete" onClick={() => void remove(m)}>
-                <Trash2 size={16} />
+              <button className="icon-btn danger-btn" title="Delete" onClick={() => remove(m)}>
+                <Trash2 size={18} />
               </button>
             </article>
           ))}
         </div>
       )}
-      {form ? (
-        <ModeratorForm
-          existing={form === 'new' ? null : form}
+      {form === 'new' ? (
+        <AddModeratorForm
+          onClose={() => setForm(null)}
+          onSaved={() => {
+            setForm(null)
+            void load()
+          }}
+        />
+      ) : form ? (
+        <ModeratorEditForm
+          existing={form}
           onClose={() => setForm(null)}
           onSaved={() => {
             setForm(null)
@@ -145,7 +162,11 @@ function PromoteStudentForm({
 }) {
   const { toast } = useToast()
   const [query, setQuery] = useState('')
-  const debounced = useDebounced(query, 350)
+  const [debounced, setDebounced] = useState('')
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(query), 350)
+    return () => clearTimeout(timer)
+  }, [query])
   const [students, setStudents] = useState<Student[] | null>(null)
   const [selected, setSelected] = useState<Student | null>(null)
   const [busy, setBusy] = useState(false)

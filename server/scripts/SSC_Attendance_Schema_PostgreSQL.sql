@@ -364,6 +364,150 @@ CREATE INDEX IF NOT EXISTS ix_attendance_scan_attempts_session_time
 CREATE INDEX IF NOT EXISTS ix_attendance_scan_attempts_token_time
     ON "AttendanceScanAttempts"("tokenHash", "scannedAtUtc");
 
+CREATE TABLE IF NOT EXISTS "EventSessionQrTokens" (
+    "eventSessionQrTokenId" BIGINT
+        GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+
+    "eventSessionId" BIGINT NOT NULL
+        REFERENCES "EventSessions"("eventSessionId")
+        ON DELETE CASCADE,
+
+    "actionCode" VARCHAR(4) NOT NULL,
+
+    "tokenHash" BYTEA NOT NULL,
+
+    "validFromUtc" TIMESTAMPTZ NOT NULL
+        DEFAULT clock_timestamp(),
+
+    "expiresAtUtc" TIMESTAMPTZ NOT NULL,
+
+    "issuedByUserId" INT NOT NULL
+        REFERENCES "Users"("userId"),
+
+    "issuedAtUtc" TIMESTAMPTZ NOT NULL
+        DEFAULT clock_timestamp(),
+
+    "revokedAtUtc" TIMESTAMPTZ NULL,
+
+    "revokedByUserId" INT NULL
+        REFERENCES "Users"("userId"),
+
+    "revocationReason" VARCHAR(500) NULL,
+
+    CONSTRAINT uq_event_session_qr_tokens_hash
+        UNIQUE ("tokenHash"),
+
+    CONSTRAINT ck_event_session_qr_tokens_action
+        CHECK ("actionCode" IN ('IN', 'OUT', 'AUTO')),
+
+    CONSTRAINT ck_event_session_qr_tokens_validity
+        CHECK ("validFromUtc" < "expiresAtUtc"),
+
+    CONSTRAINT ck_event_session_qr_tokens_revoke
+        CHECK (
+            (
+                "revokedAtUtc" IS NULL
+                AND "revokedByUserId" IS NULL
+                AND "revocationReason" IS NULL
+            )
+            OR
+            (
+                "revokedAtUtc" IS NOT NULL
+                AND "revokedByUserId" IS NOT NULL
+                AND "revocationReason" IS NOT NULL
+                AND LENGTH(TRIM("revocationReason")) > 0
+            )
+        )
+);
+
+CREATE INDEX IF NOT EXISTS ix_event_session_qr_tokens_lookup
+    ON "EventSessionQrTokens"
+       ("eventSessionId", "actionCode", "expiresAtUtc")
+    WHERE "revokedAtUtc" IS NULL;
+
+CREATE INDEX IF NOT EXISTS ix_event_session_qr_tokens_hash
+    ON "EventSessionQrTokens"("tokenHash");
+
+ALTER TABLE "AttendanceScanAttempts"
+ADD COLUMN IF NOT EXISTS "eventSessionQrTokenId" BIGINT NULL
+    REFERENCES "EventSessionQrTokens"("eventSessionQrTokenId");
+
+ALTER TABLE "AttendanceScanAttempts"
+ADD COLUMN IF NOT EXISTS "scanMethodCode" VARCHAR(30) NOT NULL
+    DEFAULT 'STAFF_SCANNED_STUDENT_QR';
+
+ALTER TABLE "AttendanceScanAttempts"
+DROP CONSTRAINT IF EXISTS ck_attendance_scan_attempts_method;
+
+ALTER TABLE "AttendanceScanAttempts"
+ADD CONSTRAINT ck_attendance_scan_attempts_method
+CHECK (
+    "scanMethodCode" IN (
+        'STUDENT_SCANNED_EVENT_QR',
+        'STAFF_SCANNED_STUDENT_QR',
+        'MANUAL_STUDENT_NUMBER',
+        'ADMIN_CORRECTION'
+    )
+);
+
+ALTER TABLE "AttendanceScanAttempts"
+ADD COLUMN IF NOT EXISTS "clientFingerprintHash" BYTEA NULL;
+
+ALTER TABLE "AttendanceScanAttempts"
+ADD COLUMN IF NOT EXISTS "ipAddress" INET NULL;
+
+ALTER TABLE "AttendanceScanAttempts"
+ADD COLUMN IF NOT EXISTS "latitude" NUMERIC(9,6) NULL;
+
+ALTER TABLE "AttendanceScanAttempts"
+ADD COLUMN IF NOT EXISTS "longitude" NUMERIC(9,6) NULL;
+
+ALTER TABLE "AttendanceScanAttempts"
+ADD COLUMN IF NOT EXISTS "locationAccuracyMeters" NUMERIC(10,2) NULL;
+
+-- ----------------------------------------------------------------------------
+-- STUDENT LOGIN ACCOUNT LINK
+-- Connects an authenticated user account to one student record.
+-- ----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS "StudentUserLinks" (
+    "userId" INT NOT NULL,
+    "studentId" BIGINT NOT NULL,
+    "linkedByUserId" INT NULL,
+    "linkedAtUtc" TIMESTAMPTZ NOT NULL
+        DEFAULT clock_timestamp(),
+
+    CONSTRAINT pk_student_user_links
+        PRIMARY KEY ("userId"),
+
+    CONSTRAINT uq_student_user_links_student
+        UNIQUE ("studentId"),
+
+    CONSTRAINT fk_student_user_links_user
+        FOREIGN KEY ("userId")
+        REFERENCES "Users"("userId")
+        ON DELETE RESTRICT,
+
+    CONSTRAINT fk_student_user_links_student
+        FOREIGN KEY ("studentId")
+        REFERENCES "Students"("studentId")
+        ON DELETE RESTRICT,
+
+    CONSTRAINT fk_student_user_links_linked_by
+        FOREIGN KEY ("linkedByUserId")
+        REFERENCES "Users"("userId")
+        ON DELETE RESTRICT,
+
+    CONSTRAINT ck_student_user_links_different_linker
+        CHECK (
+            "linkedByUserId" IS NULL
+            OR "linkedByUserId" <> "userId"
+        )
+);
+
+CREATE INDEX IF NOT EXISTS ix_student_user_links_student
+    ON "StudentUserLinks"("studentId");
+
 -- ----------------------------------------------------------------------------
 -- 5. FINE POLICY ENGINE & TEMPLATES
 -- ----------------------------------------------------------------------------
@@ -1588,6 +1732,455 @@ BEGIN
     END LOOP;
 END;
 $$;
+
+-- ----------------------------------------------------------------------------
+-- 10. EVENT QR SELF-SCAN FUNCTIONS
+-- ----------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION fn_event_session_qr_issue(
+    p_event_session_id BIGINT,
+    p_action_code VARCHAR(4),
+    p_token_hash BYTEA,
+    p_valid_for_seconds INT,
+    p_overlap_seconds INT,
+    p_actor_user_id INT
+)
+RETURNS TABLE (
+    "eventSessionQrTokenId" BIGINT,
+    "eventSessionId" BIGINT,
+    "actionCode" VARCHAR(4),
+    "validFromUtc" TIMESTAMPTZ,
+    "expiresAtUtc" TIMESTAMPTZ
+)
+LANGUAGE plpgsql
+AS $function$
+DECLARE
+    v_now TIMESTAMPTZ := clock_timestamp();
+    v_token_id BIGINT;
+    v_event_status VARCHAR(20);
+    v_session_closed BOOLEAN;
+BEGIN
+    IF p_action_code NOT IN ('IN', 'OUT', 'AUTO') THEN
+        RAISE EXCEPTION 'Action code must be IN, OUT, or AUTO.'
+            USING ERRCODE = '22023';
+    END IF;
+
+    IF p_valid_for_seconds NOT BETWEEN 15 AND 3600 THEN
+        RAISE EXCEPTION 'QR validity must be between 15 and 3600 seconds.'
+            USING ERRCODE = '22023';
+    END IF;
+
+    IF p_overlap_seconds NOT BETWEEN 0 AND 30 THEN
+        RAISE EXCEPTION 'QR overlap must be between 0 and 30 seconds.'
+            USING ERRCODE = '22023';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM "Users" u
+        WHERE u."userId" = p_actor_user_id
+          AND u."isActive" = TRUE
+          AND u."canManageAttendance" = TRUE
+    ) THEN
+        RAISE EXCEPTION 'Active attendance manager authorization required.'
+            USING ERRCODE = '42501';
+    END IF;
+
+    SELECT e."eventStatusCode", s."isClosed"
+      INTO v_event_status, v_session_closed
+      FROM "EventSessions" s
+      JOIN "Events" e ON e."eventId" = s."eventId"
+     WHERE s."eventSessionId" = p_event_session_id
+     FOR UPDATE OF s;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Event session not found.' USING ERRCODE = 'P0002';
+    END IF;
+
+    IF v_event_status <> 'PUBLISHED' OR v_session_closed THEN
+        RAISE EXCEPTION 'QR issuance requires a published event and open session.'
+            USING ERRCODE = '55000';
+    END IF;
+
+    -- Shorten older tokens but retain a small overlap for in-flight scans.
+    UPDATE "EventSessionQrTokens" q
+       SET "expiresAtUtc" = LEAST(
+               q."expiresAtUtc",
+               v_now + make_interval(secs => p_overlap_seconds)
+           )
+     WHERE q."eventSessionId" = p_event_session_id
+       AND q."actionCode" = p_action_code
+       AND q."revokedAtUtc" IS NULL
+       AND q."expiresAtUtc" > v_now + make_interval(secs => p_overlap_seconds);
+
+    INSERT INTO "EventSessionQrTokens" (
+        "eventSessionId", "actionCode", "tokenHash",
+        "validFromUtc", "expiresAtUtc", "issuedByUserId", "issuedAtUtc"
+    )
+    VALUES (
+        p_event_session_id,
+        p_action_code,
+        p_token_hash,
+        v_now,
+        v_now + make_interval(secs => p_valid_for_seconds),
+        p_actor_user_id,
+        v_now
+    )
+    RETURNING "EventSessionQrTokens"."eventSessionQrTokenId" INTO v_token_id;
+
+    RETURN QUERY
+    SELECT
+        v_token_id,
+        p_event_session_id,
+        p_action_code,
+        v_now,
+        v_now + make_interval(secs => p_valid_for_seconds);
+END
+$function$;
+
+CREATE OR REPLACE PROCEDURE sp_event_session_qr_revoke(
+    p_event_session_qr_token_id BIGINT,
+    p_reason VARCHAR(500),
+    p_actor_user_id INT
+)
+LANGUAGE plpgsql
+AS $procedure$
+BEGIN
+    IF p_reason IS NULL OR length(trim(p_reason)) = 0 THEN
+        RAISE EXCEPTION 'Revocation reason is required.' USING ERRCODE = '22023';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM "Users" u
+        WHERE u."userId" = p_actor_user_id
+          AND u."isActive" = TRUE
+          AND u."canManageAttendance" = TRUE
+    ) THEN
+        RAISE EXCEPTION 'Active attendance manager authorization required.'
+            USING ERRCODE = '42501';
+    END IF;
+
+    UPDATE "EventSessionQrTokens"
+       SET "revokedAtUtc" = clock_timestamp(),
+           "revokedByUserId" = p_actor_user_id,
+           "revocationReason" = trim(p_reason)
+     WHERE "eventSessionQrTokenId" = p_event_session_qr_token_id
+       AND "revokedAtUtc" IS NULL;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Active event-session QR token not found.'
+            USING ERRCODE = 'P0002';
+    END IF;
+END
+$procedure$;
+
+CREATE OR REPLACE FUNCTION fn_attendance_self_scan_event_qr(
+    p_token_hash BYTEA,
+    p_authenticated_user_id INT,
+    p_client_request_id UUID,
+    p_client_fingerprint_hash BYTEA DEFAULT NULL,
+    p_ip_address INET DEFAULT NULL
+)
+RETURNS TABLE (
+    "scanResultCode" VARCHAR(20),
+    "failureReasonCode" VARCHAR(40),
+    "eventId" BIGINT,
+    "eventName" VARCHAR(200),
+    "eventSessionId" BIGINT,
+    "sessionName" VARCHAR(100),
+    "studentId" BIGINT,
+    "studentNumber" VARCHAR(50),
+    "studentFullName" VARCHAR(320),
+    "actionRecorded" VARCHAR(3),
+    "attendanceStatus" VARCHAR(30),
+    "recordedAtUtc" TIMESTAMPTZ
+)
+LANGUAGE plpgsql
+AS $function$
+DECLARE
+    v_now TIMESTAMPTZ := clock_timestamp();
+    v_existing RECORD;
+    v_qr_id BIGINT;
+    v_qr_action VARCHAR(4);
+    v_valid_from TIMESTAMPTZ;
+    v_expires_at TIMESTAMPTZ;
+    v_revoked_at TIMESTAMPTZ;
+    v_event_id BIGINT;
+    v_event_name VARCHAR(200);
+    v_event_status VARCHAR(20);
+    v_session_id BIGINT;
+    v_session_name VARCHAR(100);
+    v_session_closed BOOLEAN;
+    v_in_open TIMESTAMPTZ;
+    v_in_close TIMESTAMPTZ;
+    v_late_after TIMESTAMPTZ;
+    v_out_open TIMESTAMPTZ;
+    v_out_close TIMESTAMPTZ;
+    v_requires_out BOOLEAN;
+    v_minimum_minutes SMALLINT;
+    v_student_id BIGINT;
+    v_student_number VARCHAR(50);
+    v_student_name VARCHAR(320);
+    v_participant_id BIGINT;
+    v_attendance_record_id BIGINT;
+    v_checked_in TIMESTAMPTZ;
+    v_checked_out TIMESTAMPTZ;
+    v_is_excused BOOLEAN;
+    v_excuse_reason VARCHAR(500);
+    v_action VARCHAR(3);
+    v_result VARCHAR(20) := 'REJECTED';
+    v_reason VARCHAR(40);
+    v_attendance_status VARCHAR(30);
+    v_effective_at TIMESTAMPTZ;
+BEGIN
+    IF p_client_request_id IS NULL THEN
+        RAISE EXCEPTION 'clientRequestId is required.' USING ERRCODE = '22004';
+    END IF;
+
+    PERFORM pg_advisory_xact_lock(
+        hashtextextended(p_client_request_id::text, 847291)
+    );
+
+    SELECT a.*
+      INTO v_existing
+      FROM "AttendanceScanAttempts" a
+     WHERE a."clientRequestId" = p_client_request_id;
+
+    IF FOUND THEN
+        RETURN QUERY
+        SELECT
+            v_existing."scanResultCode"::VARCHAR(20),
+            v_existing."failureReasonCode"::VARCHAR(40),
+            e."eventId",
+            e."eventName",
+            s."eventSessionId",
+            s."sessionName",
+            st."studentId",
+            st."studentNumber",
+            concat_ws(' ', st."firstName", st."middleName", st."lastName", st.suffix)::VARCHAR(320),
+            v_existing."actionCode"::VARCHAR(3),
+            v_existing."attendanceStatusCode"::VARCHAR(30),
+            COALESCE(v_existing."attendanceEffectiveAtUtc", v_existing."scannedAtUtc")
+        FROM (SELECT 1) seed
+        LEFT JOIN "EventSessions" s
+          ON s."eventSessionId" = v_existing."eventSessionId"
+        LEFT JOIN "Events" e ON e."eventId" = s."eventId"
+        LEFT JOIN "Students" st
+          ON st."studentId" = v_existing."resolvedStudentId";
+        RETURN;
+    END IF;
+
+    SELECT
+        q."eventSessionQrTokenId", q."actionCode", q."validFromUtc",
+        q."expiresAtUtc", q."revokedAtUtc",
+        s."eventSessionId", s."sessionName", s."isClosed",
+        s."checkInOpensAtUtc", s."checkInClosesAtUtc", s."lateAfterUtc",
+        s."checkOutOpensAtUtc", s."checkOutClosesAtUtc",
+        s."requiresCheckOut", s."minimumMinutes",
+        e."eventId", e."eventName", e."eventStatusCode"
+      INTO
+        v_qr_id, v_qr_action, v_valid_from, v_expires_at, v_revoked_at,
+        v_session_id, v_session_name, v_session_closed,
+        v_in_open, v_in_close, v_late_after,
+        v_out_open, v_out_close, v_requires_out, v_minimum_minutes,
+        v_event_id, v_event_name, v_event_status
+      FROM "EventSessionQrTokens" q
+      JOIN "EventSessions" s
+        ON s."eventSessionId" = q."eventSessionId"
+      JOIN "Events" e ON e."eventId" = s."eventId"
+     WHERE q."tokenHash" = p_token_hash;
+
+    IF NOT FOUND THEN
+        v_reason := 'INVALID_QR_TOKEN';
+    ELSIF v_revoked_at IS NOT NULL THEN
+        v_reason := 'REVOKED_QR_TOKEN';
+    ELSIF v_now < v_valid_from THEN
+        v_reason := 'QR_NOT_YET_VALID';
+    ELSIF v_now >= v_expires_at THEN
+        v_reason := 'EXPIRED_QR_TOKEN';
+    ELSIF v_event_status = 'CANCELLED' THEN
+        v_reason := 'EVENT_CANCELLED';
+    ELSIF v_event_status <> 'PUBLISHED' THEN
+        v_reason := 'EVENT_NOT_PUBLISHED';
+    ELSIF v_session_closed THEN
+        v_reason := 'SESSION_CLOSED';
+    END IF;
+
+    IF v_reason IS NULL THEN
+        SELECT st."studentId", st."studentNumber",
+               concat_ws(' ', st."firstName", st."middleName", st."lastName", st.suffix)
+          INTO v_student_id, v_student_number, v_student_name
+          FROM "StudentUserLinks" sul
+          JOIN "Users" u ON u."userId" = sul."userId"
+          JOIN "Students" st ON st."studentId" = sul."studentId"
+         WHERE sul."userId" = p_authenticated_user_id
+           AND u."isActive" = TRUE
+           AND st."isActive" = TRUE;
+
+        IF NOT FOUND THEN
+            v_reason := 'STUDENT_ACCOUNT_NOT_LINKED';
+        END IF;
+    END IF;
+
+    IF v_reason IS NULL THEN
+        SELECT ep."eventParticipantId"
+          INTO v_participant_id
+          FROM "EventParticipants" ep
+         WHERE ep."eventSessionId" = v_session_id
+           AND ep."studentId" = v_student_id
+         FOR UPDATE;
+
+        IF NOT FOUND THEN
+            v_reason := 'NOT_ON_SESSION_ROSTER';
+        END IF;
+    END IF;
+
+    IF v_reason IS NULL THEN
+        SELECT ar."attendanceRecordId", ar."checkedInAtUtc",
+               ar."checkedOutAtUtc", ar."isExcused", ar."excuseReason"
+          INTO v_attendance_record_id, v_checked_in,
+               v_checked_out, v_is_excused, v_excuse_reason
+          FROM "AttendanceRecords" ar
+         WHERE ar."eventParticipantId" = v_participant_id;
+
+        IF v_qr_action = 'AUTO' THEN
+            IF v_checked_in IS NULL THEN
+                v_action := 'IN';
+            ELSIF v_requires_out AND v_checked_out IS NULL
+                  AND v_out_open IS NOT NULL AND v_now >= v_out_open THEN
+                v_action := 'OUT';
+            ELSE
+                v_action := 'IN';
+            END IF;
+        ELSE
+            v_action := v_qr_action::VARCHAR(3);
+        END IF;
+
+        IF v_action = 'IN' THEN
+            IF v_checked_in IS NOT NULL THEN
+                v_result := 'NO_CHANGE';
+                v_reason := 'ALREADY_CHECKED_IN';
+                v_effective_at := v_checked_in;
+            ELSIF v_now < v_in_open OR v_now > v_in_close THEN
+                v_reason := 'OUTSIDE_CHECKIN_WINDOW';
+            ELSE
+                IF v_attendance_record_id IS NULL THEN
+                    INSERT INTO "AttendanceRecords" (
+                        "eventParticipantId", "checkedInAtUtc",
+                        "lastChangedByUserId", "lastChangedAtUtc"
+                    )
+                    VALUES (
+                        v_participant_id, v_now,
+                        p_authenticated_user_id, v_now
+                    )
+                    RETURNING "attendanceRecordId"
+                         INTO v_attendance_record_id;
+                    v_is_excused := FALSE;
+                ELSE
+                    UPDATE "AttendanceRecords"
+                       SET "checkedInAtUtc" = v_now,
+                           "lastChangedByUserId" = p_authenticated_user_id,
+                           "lastChangedAtUtc" = v_now
+                     WHERE "attendanceRecordId" = v_attendance_record_id;
+                END IF;
+
+                INSERT INTO "AttendanceLogs" (
+                    "attendanceRecordId", "actionCode",
+                    "oldCheckInAtUtc", "oldCheckOutAtUtc",
+                    "newCheckInAtUtc", "newCheckOutAtUtc",
+                    "oldIsExcused", "newIsExcused", "actorUserId"
+                )
+                VALUES (
+                    v_attendance_record_id, 'CHECK_IN',
+                    v_checked_in, v_checked_out,
+                    v_now, v_checked_out,
+                    v_is_excused, v_is_excused, p_authenticated_user_id
+                );
+
+                v_checked_in := v_now;
+                v_result := 'ACCEPTED';
+                v_effective_at := v_now;
+            END IF;
+        ELSIF v_action = 'OUT' THEN
+            IF v_checked_in IS NULL THEN
+                v_reason := 'CHECKIN_REQUIRED_FIRST';
+            ELSIF v_checked_out IS NOT NULL THEN
+                v_result := 'NO_CHANGE';
+                v_reason := 'ALREADY_CHECKED_OUT';
+                v_effective_at := v_checked_out;
+            ELSIF v_requires_out = FALSE THEN
+                v_reason := 'CHECKOUT_NOT_REQUIRED';
+            ELSIF v_now < v_out_open OR v_now > v_out_close THEN
+                v_reason := 'OUTSIDE_CHECKOUT_WINDOW';
+            ELSE
+                UPDATE "AttendanceRecords"
+                   SET "checkedOutAtUtc" = v_now,
+                       "lastChangedByUserId" = p_authenticated_user_id,
+                       "lastChangedAtUtc" = v_now
+                 WHERE "attendanceRecordId" = v_attendance_record_id;
+
+                INSERT INTO "AttendanceLogs" (
+                    "attendanceRecordId", "actionCode",
+                    "oldCheckInAtUtc", "oldCheckOutAtUtc",
+                    "newCheckInAtUtc", "newCheckOutAtUtc",
+                    "oldIsExcused", "newIsExcused", "actorUserId"
+                )
+                VALUES (
+                    v_attendance_record_id, 'CHECK_OUT',
+                    v_checked_in, v_checked_out,
+                    v_checked_in, v_now,
+                    v_is_excused, v_is_excused, p_authenticated_user_id
+                );
+
+                v_checked_out := v_now;
+                v_result := 'ACCEPTED';
+                v_effective_at := v_now;
+            END IF;
+        END IF;
+    END IF;
+
+    IF v_participant_id IS NOT NULL AND v_checked_in IS NOT NULL THEN
+        SELECT va."attendanceStatus"::VARCHAR(30)
+          INTO v_attendance_status
+          FROM "VwEventAttendance" va
+         WHERE va."eventParticipantId" = v_participant_id;
+    END IF;
+
+    INSERT INTO "AttendanceScanAttempts" (
+        "eventSessionId", "eventRegistrationId", "eventParticipantId",
+        "attendanceDeviceId", "tokenHash", "actionCode",
+        "scanResultCode", "failureReasonCode", "processedByUserId",
+        "scannedAtUtc", "eventSessionQrTokenId", "resolvedStudentId",
+        "scanMethodCode", "clientRequestId", "clientFingerprintHash",
+        "ipAddress", "attendanceStatusCode", "attendanceEffectiveAtUtc"
+    )
+    VALUES (
+        v_session_id, NULL, v_participant_id,
+        NULL, p_token_hash, v_action,
+        v_result, v_reason, p_authenticated_user_id,
+        v_now, v_qr_id, v_student_id,
+        'STUDENT_SCANNED_EVENT_QR', p_client_request_id,
+        p_client_fingerprint_hash, p_ip_address,
+        v_attendance_status, v_effective_at
+    );
+
+    RETURN QUERY
+    SELECT
+        v_result,
+        v_reason,
+        v_event_id,
+        v_event_name,
+        v_session_id,
+        v_session_name,
+        v_student_id,
+        v_student_number,
+        v_student_name,
+        v_action,
+        v_attendance_status,
+        COALESCE(v_effective_at, v_now);
+END
+$function$;
 
 -- ----------------------------------------------------------------------------
 -- 9. SERVICE ROLE & SECURITY

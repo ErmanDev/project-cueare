@@ -4378,3 +4378,132 @@ export async function updateAcademicProgram(
   );
 }
 
+export type IssuedQrTokenRow = {
+  eventSessionQrTokenId: number;
+  eventSessionId: number;
+  actionCode: string;
+  validFromUtc: Date;
+  expiresAtUtc: Date;
+};
+
+export async function issueEventSessionQrToken(
+  db: Queryable,
+  opts: {
+    eventSessionId: number;
+    actionCode: string;
+    tokenHash: Buffer;
+    validForSeconds: number;
+    overlapSeconds: number;
+    actorUserId: number;
+  },
+): Promise<IssuedQrTokenRow> {
+  const row = await one<IssuedQrTokenRow>(
+    db,
+    `SELECT
+       "eventSessionQrTokenId",
+       "eventSessionId",
+       "actionCode",
+       "validFromUtc",
+       "expiresAtUtc"
+     FROM fn_event_session_qr_issue($1, $2, $3, $4, $5, $6)`,
+    [
+      opts.eventSessionId,
+      opts.actionCode,
+      opts.tokenHash,
+      opts.validForSeconds,
+      opts.overlapSeconds,
+      opts.actorUserId,
+    ],
+  );
+  if (!row) throw badRequest('Failed to issue QR token');
+  return row;
+}
+
+export async function revokeEventSessionQrToken(
+  db: Queryable,
+  opts: {
+    eventSessionQrTokenId: number;
+    reason: string;
+    actorUserId: number;
+  },
+): Promise<void> {
+  await db.query(`CALL sp_event_session_qr_revoke($1, $2, $3)`, [
+    opts.eventSessionQrTokenId,
+    opts.reason,
+    opts.actorUserId,
+  ]);
+}
+
+export type SelfScanResultRow = {
+  scanResultCode: string;
+  failureReasonCode: string | null;
+  eventId: number | null;
+  eventName: string | null;
+  eventSessionId: number | null;
+  sessionName: string | null;
+  studentId: number | null;
+  studentNumber: string | null;
+  studentFullName: string | null;
+  actionRecorded: string | null;
+  attendanceStatus: string | null;
+  recordedAtUtc: Date;
+};
+
+export async function attendanceSelfScanEventQr(
+  db: Queryable,
+  opts: {
+    tokenHash: Buffer;
+    authenticatedUserId: number;
+    clientRequestId: string;
+    clientFingerprintHash?: Buffer | null;
+    ipAddress?: string | null;
+  },
+): Promise<SelfScanResultRow> {
+  const row = await one<SelfScanResultRow>(
+    db,
+    `SELECT
+       "scanResultCode",
+       "failureReasonCode",
+       "eventId",
+       "eventName",
+       "eventSessionId",
+       "sessionName",
+       "studentId",
+       "studentNumber",
+       "studentFullName",
+       "actionRecorded",
+       "attendanceStatus",
+       "recordedAtUtc"
+     FROM fn_attendance_self_scan_event_qr($1, $2, $3, $4, $5)`,
+    [
+      opts.tokenHash,
+      opts.authenticatedUserId,
+      opts.clientRequestId,
+      opts.clientFingerprintHash ?? null,
+      opts.ipAddress ?? null,
+    ],
+  );
+  if (!row) throw badRequest('Self scan execution failed');
+  return row;
+}
+
+export async function linkUserToStudent(
+  db: Queryable,
+  opts: {
+    userId: number;
+    studentId: number;
+    linkedByUserId?: number | null;
+  },
+): Promise<void> {
+  await db.query(
+    `INSERT INTO ${q('StudentUserLinks')} (${q('userId')}, ${q('studentId')}, ${q('linkedByUserId')})
+     VALUES ($1, $2, $3)
+     ON CONFLICT (${q('userId')}) DO UPDATE
+     SET ${q('studentId')} = EXCLUDED.${q('studentId')},
+         ${q('linkedByUserId')} = EXCLUDED.${q('linkedByUserId')},
+         ${q('linkedAtUtc')} = clock_timestamp()`,
+    [opts.userId, opts.studentId, opts.linkedByUserId ?? null],
+  );
+}
+
+

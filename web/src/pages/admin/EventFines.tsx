@@ -31,6 +31,8 @@ type Report = {
   preview: Preview[]
 }
 
+const PAGE_SIZE = 25
+
 function violation(code: string) {
   return code.replace(/_/g, ' ').toLowerCase().replace(/^\w/, (letter) => letter.toUpperCase())
 }
@@ -42,6 +44,8 @@ export function EventFines() {
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [sessionId, setSessionId] = useState<number | null>(null)
+  const [page, setPage] = useState(1)
+  const [previewPage, setPreviewPage] = useState(1)
 
   useEffect(() => {
     if (!Number.isSafeInteger(eventId) || eventId <= 0) return
@@ -92,6 +96,14 @@ export function EventFines() {
       (!needle || `${row.first_name} ${row.last_name} ${row.student_number}`.toLowerCase().includes(needle))
   })
 
+  const visibleTotal = visible.length
+  const visibleLastPage = Math.max(1, Math.ceil(visibleTotal / PAGE_SIZE))
+  const pagedVisible = visible.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+
+  const previewTotal = preview.length
+  const previewLastPage = Math.max(1, Math.ceil(previewTotal / PAGE_SIZE))
+  const pagedPreview = preview.slice((previewPage - 1) * PAGE_SIZE, previewPage * PAGE_SIZE)
+
   if (!Number.isSafeInteger(eventId) || eventId <= 0) return <EmptyState title="Invalid event" />
   if (error) return <><Link to="/superadmin/events" className="btn btn-secondary"><ArrowLeft size={16} /> Events</Link><p className="error-text">{error}</p></>
   if (!report) return <TableSkeleton label="Loading event fines" rows={4} columns={[{ label: 'Student', width: '70%' }]} />
@@ -126,19 +138,43 @@ export function EventFines() {
         </tbody></table></div></div>}
       <div className="page-head"><div><h3>Student assessments</h3><p>Existing fines, payment progress, and outstanding balances.</p></div></div>
       <div className="filter-bar">
-        <div className="search"><input aria-label="Search students" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search student or ID..." /></div>
-        <select className="filter-control" aria-label="Filter session" value={sessionId ?? ''} onChange={(e) => setSessionId(e.target.value ? Number(e.target.value) : null)}>
+        <div className="search"><input aria-label="Search students" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1) }} placeholder="Search student or ID..." /></div>
+        <select className="filter-control" aria-label="Filter session" value={sessionId ?? ''} onChange={(e) => { setSessionId(e.target.value ? Number(e.target.value) : null); setPage(1) }}>
           <option value="">All sessions</option>{sessions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
         </select>
       </div>
-      {visible.length === 0 ? <EmptyState title="No student assessments match" /> :
-        <div className="card table-card"><div className="table-wrap"><table className="data"><thead><tr><th>Student</th><th>ID</th><th>Session</th><th>Violation</th><th>Status</th><th>Assessed</th><th>Paid</th><th>Outstanding</th></tr></thead><tbody>
-          {visible.map((row) => <tr key={row.assessment_id}><td><strong>{row.first_name} {row.last_name}</strong></td><td>{row.student_number}</td><td>{row.session_name}</td><td>{violation(row.violation_code)}</td><td>{violation(row.status)}</td><td>{phpAmount(row.assessed_amount)}</td><td>{phpAmount(row.paid_amount)}</td><td>{phpAmount(row.outstanding_amount)}</td></tr>)}
-        </tbody></table></div></div>}
-      {preview.length > 0 ? <><div className="page-head" style={{ marginTop: '1.25rem' }}><div><h3>Estimated on closure</h3><p>These sessions have ended but remain open. Closing a session posts its fines; attendance changes before closure may change this estimate.</p></div></div>
-        <div className="card table-card"><div className="table-wrap"><table className="data"><thead><tr><th>Student</th><th>ID</th><th>Session</th><th>Violation</th><th>Estimated amount</th></tr></thead><tbody>
-          {preview.map((row) => <tr key={`${row.student_id}:${row.session_id}:${row.violation_code}`}><td>{row.first_name} {row.last_name}</td><td>{row.student_number}</td><td>{row.session_name}</td><td>{violation(row.violation_code)}</td><td>{phpAmount(row.amount)}</td></tr>)}
-        </tbody></table></div></div></> : null}
+      {visibleTotal === 0 ? <EmptyState title="No student assessments match" /> :
+        <div className="card table-card">
+          <div className="table-wrap"><table className="data"><thead><tr><th>Student</th><th>ID</th><th>Session</th><th>Violation</th><th>Status</th><th>Assessed</th><th>Paid</th><th>Outstanding</th></tr></thead><tbody>
+            {pagedVisible.map((row) => <tr key={row.assessment_id}><td><strong>{row.first_name} {row.last_name}</strong></td><td>{row.student_number}</td><td>{row.session_name}</td><td>{violation(row.violation_code)}</td><td>{violation(row.status)}</td><td>{phpAmount(row.assessed_amount)}</td><td>{phpAmount(row.paid_amount)}</td><td>{phpAmount(row.outstanding_amount)}</td></tr>)}
+          </tbody></table></div>
+          <div className="table-meta pager-bar">
+            <p className="muted">Showing {visibleTotal === 0 ? 0 : (page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, visibleTotal)} of {visibleTotal}</p>
+            <nav className="pager" aria-label="Assessment pages">
+              <button type="button" className="pager-btn" disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous</button>
+              <span>{page} / {visibleLastPage}</span>
+              <button type="button" className="pager-btn" disabled={page >= visibleLastPage} onClick={() => setPage(page + 1)}>Next</button>
+            </nav>
+          </div>
+        </div>}
+      {previewTotal > 0 ? <>
+        <div className="page-head" style={{ marginTop: '1.25rem' }}><div><h3>Estimated on closure</h3><p>These sessions have ended but remain open. Closing a session posts its fines; attendance changes before closure may change this estimate.</p></div></div>
+        <div className="card table-card">
+          <div className="table-wrap"><table className="data"><thead><tr><th>Student</th><th>ID</th><th>Session</th><th>Violation</th><th>Estimated amount</th></tr></thead><tbody>
+            {pagedPreview.map((row) => <tr key={`${row.student_id}:${row.session_id}:${row.violation_code}`}><td>{row.first_name} {row.last_name}</td><td>{row.student_number}</td><td>{row.session_name}</td><td>{violation(row.violation_code)}</td><td>{phpAmount(row.amount)}</td></tr>)}
+          </tbody></table></div>
+          {previewTotal > PAGE_SIZE ? (
+            <div className="table-meta pager-bar">
+              <p className="muted">Showing {(previewPage - 1) * PAGE_SIZE + 1}–{Math.min(previewPage * PAGE_SIZE, previewTotal)} of {previewTotal}</p>
+              <nav className="pager" aria-label="Estimate pages">
+                <button type="button" className="pager-btn" disabled={previewPage <= 1} onClick={() => setPreviewPage(previewPage - 1)}>Previous</button>
+                <span>{previewPage} / {previewLastPage}</span>
+                <button type="button" className="pager-btn" disabled={previewPage >= previewLastPage} onClick={() => setPreviewPage(previewPage + 1)}>Next</button>
+              </nav>
+            </div>
+          ) : null}
+        </div>
+      </> : null}
     </>}
   </>
 }

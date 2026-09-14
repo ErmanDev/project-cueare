@@ -219,17 +219,14 @@ export class AttendanceService {
       );
     }
     const isOut = args.direction === DIRECTION.out;
-    if (!isOut) return;
-    const closes =
-      parseMinutes(args.window.out_end ?? args.window.end_time) ?? end;
-    const opens =
-      parseMinutes(args.window.out_start ?? args.window.start_time) ?? start;
+    const closes = parseMinutes(isOut ? args.window.out_end ?? args.window.end_time : args.window.end_time) ?? end;
+    const opens = isOut ? parseMinutes(args.window.out_start ?? args.window.start_time) ?? start : start;
     if (minutes < opens) {
-      throw conflict(`Check-out for "${args.window.session_label}" has not opened yet`);
+      throw conflict(`${isOut ? 'Check-out' : 'Check-in'} for "${args.window.session_label}" has not opened yet`);
     }
     if (minutes >= closes) {
       throw conflict(
-        `Check-out for "${args.window.session_label}" has closed`,
+        `${isOut ? 'Check-out' : 'Check-in'} for "${args.window.session_label}" has closed`,
         {
           code: 'SESSION_ENDED',
           session_label: args.window.session_label,
@@ -241,18 +238,31 @@ export class AttendanceService {
     }
   }
 
-  ensureLateManualCheckInAllowed(event: EventRow, window: SessionWindowRow): void {
+  ensureLateManualCheckInAllowed(event: EventRow, window: SessionWindowRow, actionLabel = 'Manual check-in'): void {
     if (window.is_closed) throw conflict(`Session "${window.session_label}" is closed`);
     const now = this.now();
     const sessionDay = window.session_date
       ? new Date(`${window.session_date}T00:00:00`)
       : event.event_start_date;
     if (!isSameDay(now, sessionDay)) {
-      throw conflict(`Manual check-in for "${window.session_label}" is only allowed on its session date`);
+      const y = String(sessionDay.getFullYear()).padStart(4, '0');
+      const m = String(sessionDay.getMonth() + 1).padStart(2, '0');
+      const d = String(sessionDay.getDate()).padStart(2, '0');
+      throw conflict(`${actionLabel} for "${window.session_label}" is only allowed on ${y}-${m}-${d}`, {
+        code: 'EVENT_NOT_TODAY',
+        event_date: sessionDay.toISOString(),
+        server_time: now.toISOString(),
+      });
     }
     const start = parseMinutes(window.start_time);
     if (start == null || minutesOfDay(now) < start) {
-      throw conflict(`Session "${window.session_label}" has not started yet`);
+      throw conflict(`Session "${window.session_label}" has not started yet`, {
+        code: 'SESSION_NOT_STARTED',
+        session_label: window.session_label,
+        start_time: window.start_time,
+        end_time: window.end_time,
+        server_time: now.toISOString(),
+      });
     }
   }
 
@@ -356,7 +366,11 @@ export class AttendanceService {
       studentId: student.id,
       sessionWindowId: window.id,
     });
-    this.ensureSessionAcceptingScans({ event, window, direction: direction.direction });
+    if (mode === 'manual' && direction.direction === DIRECTION.in) {
+      this.ensureLateManualCheckInAllowed(event, window, 'Manual check-in');
+    } else {
+      this.ensureSessionAcceptingScans({ event, window, direction: direction.direction });
+    }
     return {
       student,
       event,
@@ -376,6 +390,7 @@ export class AttendanceService {
     expectedDirection?: string | null;
     deviceNote?: string | null;
     allowLateManualCheckIn?: boolean;
+    allowLateManualCheckOut?: boolean;
   }): Promise<AttendanceLogRow> {
     const note = sanitizeDeviceNote(args.deviceNote);
     return this.writes.run(args.studentId, args.sessionWindowId, () =>
@@ -402,8 +417,11 @@ export class AttendanceService {
           forUpdate: true,
         });
         if (args.allowLateManualCheckIn) {
-          if (args.expectedDirection !== DIRECTION.in) throw badRequest('Manual check-in must record IN');
-          this.ensureLateManualCheckInAllowed(event, window);
+          if (args.expectedDirection && args.expectedDirection !== DIRECTION.in) throw badRequest('Manual check-in must record IN');
+          this.ensureLateManualCheckInAllowed(event, window, 'Manual check-in');
+        } else if (args.allowLateManualCheckOut) {
+          if (args.expectedDirection && args.expectedDirection !== DIRECTION.out) throw badRequest('Manual check-out must record OUT');
+          this.ensureLateManualCheckInAllowed(event, window, 'Manual check-out');
         } else {
           this.ensureSessionAcceptingScans({ event, window, direction: result.direction });
         }

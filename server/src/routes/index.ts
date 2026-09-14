@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import type { Express, Request, Response } from 'express';
 
 import { requireAuth } from '../auth/middleware.ts';
@@ -26,7 +27,8 @@ function health(_req: Request, res: Response): void {
 
 import { asyncHandler } from './auth.ts';
 import { getPool } from '../db/pool.ts';
-import { listFineTemplates } from '../db/queries.ts';
+import * as q from '../db/queries.ts';
+import { jsonObject, optionalString, requireString } from '../utils/http.ts';
 
 /** Auth, admin, moderator, and student REST handlers under `prefix`. */
 export function mountRestApi(app: Express, prefix = ''): void {
@@ -44,8 +46,53 @@ export function mountRestApi(app: Express, prefix = ''): void {
   app.get(
     `${p}/fine-templates`,
     asyncHandler(async (_req, res) => {
-      const templates = await listFineTemplates(getPool());
+      const templates = await q.listFineTemplates(getPool());
       res.json(templates);
+    }),
+  );
+
+  app.post(
+    `${p}/attendance/event-qr/self-scan`,
+    requireAuth(new Set([ROLES.superadmin, ROLES.moderator, 'student'])),
+    asyncHandler(async (req, res) => {
+      const body = jsonObject(req);
+      const qrToken = requireString(body, 'qrToken');
+      const clientRequestId = optionalString(body, 'clientRequestId') ?? crypto.randomUUID();
+      const clientFingerprint = optionalString(body, 'clientFingerprint');
+
+      const tokenHash = crypto.createHash('sha256').update(qrToken.trim()).digest();
+      const clientFingerprintHash = clientFingerprint
+        ? crypto.createHash('sha256').update(clientFingerprint.trim()).digest()
+        : null;
+
+      const result = await q.attendanceSelfScanEventQr(getPool(), {
+        tokenHash,
+        authenticatedUserId: req.auth!.id,
+        clientRequestId,
+        clientFingerprintHash,
+        ipAddress: req.ip,
+      });
+
+      const isAccepted = result.scanResultCode === 'ACCEPTED' || result.scanResultCode === 'NO_CHANGE';
+      const message = isAccepted
+        ? 'Your attendance has been recorded.'
+        : (result.failureReasonCode ?? 'Self-scan rejected');
+
+      res.json({
+        scanResultCode: result.scanResultCode,
+        failureReasonCode: result.failureReasonCode,
+        eventId: result.eventId ? String(result.eventId) : null,
+        eventName: result.eventName,
+        eventSessionId: result.eventSessionId ? String(result.eventSessionId) : null,
+        sessionName: result.sessionName,
+        studentId: result.studentId ? String(result.studentId) : null,
+        studentNumber: result.studentNumber,
+        studentFullName: result.studentFullName,
+        actionRecorded: result.actionRecorded,
+        attendanceStatus: result.attendanceStatus,
+        recordedAtUtc: result.recordedAtUtc,
+        message,
+      });
     }),
   );
 
@@ -55,3 +102,4 @@ export function mountRestApi(app: Express, prefix = ''): void {
 }
 
 export { apiInfo };
+

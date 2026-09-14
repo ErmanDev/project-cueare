@@ -33,7 +33,7 @@ export function EventAttendanceDetail() {
   const [closing, setClosing] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [manualTarget, setManualTarget] = useState<EventParticipant | null>(null)
-  const [manualSessionId, setManualSessionId] = useState<number | undefined>()
+  const [manualOptionKey, setManualOptionKey] = useState<string | undefined>()
   const [manualReason, setManualReason] = useState('')
   const [manualBusy, setManualBusy] = useState(false)
 
@@ -109,21 +109,27 @@ export function EventAttendanceDetail() {
     }
   }
 
-  async function manualCheckIn() {
-    if (!manualTarget || !manualSessionId || !manualReason.trim()) return
+  async function manualAction() {
+    if (!manualTarget || !manualOptionKey || !manualReason.trim()) return
+    const [rawSessId, mode] = manualOptionKey.split(':')
+    const targetSessionId = Number(rawSessId)
+    if (!targetSessionId || (mode !== 'in' && mode !== 'out')) return
     setManualBusy(true)
     try {
-      await api.post(`/admin/events/${eventId}/attendance/check-in`, {
+      const endpoint = mode === 'in'
+        ? `/admin/events/${eventId}/attendance/check-in`
+        : `/admin/events/${eventId}/attendance/check-out`
+      await api.post(endpoint, {
         student_id: manualTarget.student_id,
-        session_window_id: manualSessionId,
+        session_window_id: targetSessionId,
         reason: manualReason.trim(),
       })
-      toast('Manual check-in recorded')
+      toast(`Manual ${mode === 'in' ? 'check-in' : 'check-out'} recorded`)
       setManualTarget(null)
       setManualReason('')
       setRevision((value) => value + 1)
     } catch (error) {
-      toast(error instanceof Error ? error.message : 'Manual check-in failed', 'error')
+      toast(error instanceof Error ? error.message : 'Manual action failed', 'error')
     } finally {
       setManualBusy(false)
     }
@@ -135,11 +141,32 @@ export function EventAttendanceDetail() {
 
   const rate = summary.registered > 0 ? `${Math.round(summary.checked_in / summary.registered * 100)}%` : '—'
   const lastPage = Math.max(1, Math.ceil(participantTotal / PAGE_SIZE))
-  const availableSessions = (person: EventParticipant) => event.session_windows.filter((window) =>
-    !summary.sessions.find((item) => item.session_id === window.id)?.is_closed &&
-    !person.sessions?.find((item) => item.session_id === window.id)?.checked_in_at_utc,
-  )
-  const targetSessions = manualTarget ? availableSessions(manualTarget) : []
+  const availableActions = (person: EventParticipant) => {
+    const options: { sessionId: number; mode: 'in' | 'out'; key: string; label: string }[] = []
+    for (const window of event.session_windows) {
+      const isClosed = summary.sessions.find((s) => s.session_id === window.id)?.is_closed
+      if (isClosed) continue
+      const personSession = person.sessions?.find((s) => s.session_id === window.id)
+      if (!personSession?.checked_in_at_utc) {
+        options.push({
+          sessionId: window.id,
+          mode: 'in',
+          key: `${window.id}:in`,
+          label: `${window.session_label} — Check In`,
+        })
+      } else if (!personSession?.checked_out_at_utc) {
+        options.push({
+          sessionId: window.id,
+          mode: 'out',
+          key: `${window.id}:out`,
+          label: `${window.session_label} — Check Out`,
+        })
+      }
+    }
+    return options
+  }
+  const targetOptions = manualTarget ? availableActions(manualTarget) : []
+  const selectedOption = targetOptions.find((opt) => opt.key === manualOptionKey) ?? targetOptions[0]
 
   return (
     <>
@@ -219,13 +246,14 @@ export function EventAttendanceDetail() {
                 {item.checked_in_at_utc ? ` · IN ${fmtDateTime(item.checked_in_at_utc)}` : ''}
                 {item.checked_out_at_utc ? ` · OUT ${fmtDateTime(item.checked_out_at_utc)}` : ''}
               </div>)}</td>
-              <td>{event.is_active && availableSessions(person).length > 0 ? (
+              <td>{event.is_active && availableActions(person).length > 0 ? (
                 <Button variant="secondary" onClick={() => {
-                  const options = availableSessions(person)
+                  const options = availableActions(person)
+                  const match = options.find((opt) => opt.sessionId === sessionId) ?? options[0]
                   setManualTarget(person)
-                  setManualSessionId(options.find((window) => window.id === sessionId)?.id ?? options[0]?.id)
+                  setManualOptionKey(match?.key)
                   setManualReason('')
-                }}>Manual check-in</Button>
+                }}>{availableActions(person).some((opt) => opt.mode === 'out') ? 'Manual action' : 'Manual check-in'}</Button>
               ) : null}</td>
             </tr>)}</tbody>
           </table></div>
@@ -243,19 +271,19 @@ export function EventAttendanceDetail() {
         <summary style={{ cursor: 'pointer', fontWeight: 700 }}>Scan history and corrections</summary>
         {historyOpen ? <AdminAttendance key={`${eventId}-${revision}`} embedded onChanged={() => setRevision((value) => value + 1)} /> : null}
       </details>
-      {manualTarget ? <Modal title="Manual check-in" onClose={() => setManualTarget(null)}>
-        <form className="form-grid" onSubmit={onSubmit(manualCheckIn)}>
+      {manualTarget ? <Modal title={selectedOption?.mode === 'out' ? 'Manual check-out' : 'Manual check-in'} onClose={() => setManualTarget(null)}>
+        <form className="form-grid" onSubmit={onSubmit(manualAction)}>
           <p><strong>{[manualTarget.first_name, manualTarget.middle_name, manualTarget.last_name].filter(Boolean).join(' ')}</strong> · {manualTarget.student_id_code}</p>
-          <Field label="Session">
-            <select required value={manualSessionId ?? ''} onChange={(e) => setManualSessionId(Number(e.target.value))}>
-              {targetSessions.map((window) => <option key={window.id} value={window.id}>{window.session_label}</option>)}
+          <Field label="Session action">
+            <select required value={manualOptionKey ?? ''} onChange={(e) => setManualOptionKey(e.target.value)}>
+              {targetOptions.map((opt) => <option key={opt.key} value={opt.key}>{opt.label}</option>)}
             </select>
           </Field>
           <Field label="Reason">
             <input required maxLength={175} value={manualReason} onChange={(e) => setManualReason(e.target.value)} placeholder="Why was QR scanning unavailable?" />
           </Field>
-          <p className="muted">Records an IN at the current server time. Admins can check in after the QR cutoff on the session day; late arrivals show as Late. Closed sessions remain locked.</p>
-          <FormActions onCancel={() => setManualTarget(null)} submitLabel="Check in" busy={manualBusy} />
+          <p className="muted">Records an {selectedOption?.mode === 'out' ? 'OUT' : 'IN'} timestamp at the current server time for the selected session. Closed sessions remain locked.</p>
+          <FormActions onCancel={() => setManualTarget(null)} submitLabel={selectedOption?.mode === 'out' ? 'Check out' : 'Check in'} busy={manualBusy} />
         </form>
       </Modal> : null}
     </>
