@@ -79,7 +79,7 @@ async function seed() {
 
     // 3. Query all live events
     const eventsRes = await client.query<EventRow>(`
-      SELECT "eventId", "academicTermId", "eventCode", "eventName", "eventDate", "eventStatusCode"
+      SELECT "eventId", "academicTermId", "eventCode", "eventName", "eventStartDate" AS "eventDate", "eventStatusCode"
       FROM ssc."Events"
       ORDER BY "eventId" ASC
     `);

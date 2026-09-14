@@ -37,7 +37,7 @@ function monthCells(cursor: Date): { key: string; day: number; inMonth: boolean 
 function groupByDay(events: Event[]): Map<string, Event[]> {
   const map = new Map<string, Event[]>()
   for (const event of events) {
-    const key = ymd(event.event_date)
+    const key = ymd(event.event_start_date)
     const list = map.get(key)
     if (list) list.push(event)
     else map.set(key, [event])

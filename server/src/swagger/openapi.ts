@@ -1144,6 +1144,26 @@ export const openApiDocument = {
         },
       },
     },
+    '/admin/events/{id}/close': {
+      post: {
+        tags: ['Admin — Events'],
+        summary: 'Close event and assess remaining session fines',
+        description: 'Closes ended sessions, posts fines under active event policy, then closes event and policy. Event closure is idempotent.',
+        security: bearer,
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+        responses: { '200': { description: 'Event closed with fine totals' }, '409': { description: 'Event or sessions cannot be closed yet' } },
+      },
+    },
+    '/admin/events/{id}/fines': {
+      get: {
+        tags: ['Admin — Fine Settlements'],
+        summary: 'Event fine report and closure estimate',
+        description: 'Returns posted assessments, confirmed payments, outstanding balances, and estimates for ended sessions that remain open.',
+        security: bearer,
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+        responses: { '200': { description: 'Event fine report' }, '404': { description: 'Event not found' } },
+      },
+    },
     '/admin/fines/balances': {
       get: {
         tags: ['Admin — Fine Settlements'],

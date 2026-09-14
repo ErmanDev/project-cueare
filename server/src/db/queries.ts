@@ -3,6 +3,7 @@ import { badRequest, conflict, isPgBusinessRule, isPgUniqueViolation, pgErrorMes
 import { parseMinutes, startOfDay } from '../utils/time.ts';
 import { PROGRAM_NAMES, type MappedImportStudent } from '../students/roster.ts';
 import { escapeLike } from '../utils/studentCode.ts';
+import { calculateFines, type FineAssessment, type FineRule, type FineStatus } from '../fines/calculation.ts';
 import { q } from './ident.ts';
 import type {
   AttendanceFilter,
@@ -15,7 +16,7 @@ import type {
 } from '../types.ts';
 
 const DEFAULT_TERM = 'DEFAULT';
-const DEFAULT_PROGRAM = 'GEN';
+const DEFAULT_PROGRAM = 'BSIT';
 
 export async function one<T>(
   db: Queryable,
@@ -111,7 +112,7 @@ function combineDateAndTime(day: Date, time: string): Date {
 }
 
 function sessionBounds(
-  eventDate: Date,
+  eventStartDate: Date,
   startTime: string,
   endTime: string,
   lateAfter?: string | null,
@@ -119,23 +120,23 @@ function sessionBounds(
   outStart?: string | null,
   outEnd?: string | null,
 ) {
-  const starts = combineDateAndTime(eventDate, startTime);
-  let ends = combineDateAndTime(eventDate, endTime);
+  const starts = combineDateAndTime(eventStartDate, startTime);
+  let ends = combineDateAndTime(eventStartDate, endTime);
   if (ends <= starts) {
     ends = new Date(ends.getTime() + 24 * 60 * 60 * 1000);
   }
-  let lateAfterUtc = lateAfter ? combineDateAndTime(eventDate, lateAfter) : starts;
+  let lateAfterUtc = lateAfter ? combineDateAndTime(eventStartDate, lateAfter) : starts;
   if (lateAfterUtc < starts) lateAfterUtc = starts;
   if (lateAfterUtc > ends) lateAfterUtc = ends;
 
-  let inEndUtc = inEnd ? combineDateAndTime(eventDate, inEnd) : ends;
+  let inEndUtc = inEnd ? combineDateAndTime(eventStartDate, inEnd) : ends;
   if (inEndUtc < lateAfterUtc) inEndUtc = lateAfterUtc;
   if (inEndUtc > ends) inEndUtc = ends;
 
-  let outStartUtc = outStart ? combineDateAndTime(eventDate, outStart) : starts;
+  let outStartUtc = outStart ? combineDateAndTime(eventStartDate, outStart) : starts;
   if (outStartUtc < starts) outStartUtc = starts;
 
-  let outEndUtc = outEnd ? combineDateAndTime(eventDate, outEnd) : ends;
+  let outEndUtc = outEnd ? combineDateAndTime(eventStartDate, outEnd) : ends;
   if (outEndUtc < outStartUtc) outEndUtc = outStartUtc;
   if (outEndUtc < ends) outEndUtc = ends;
 
@@ -200,9 +201,11 @@ function toWindow(row: {
 
 function mapEvent(row: {
   id: number;
+  academic_term_id: number;
   name: string;
-  event_date: Date | string;
-  last_session_date?: Date | string;
+  event_status: string;
+  event_start_date: Date | string;
+  event_end_date: Date | string;
   is_active: boolean;
   created_by: number;
   created_at: Date;
@@ -210,9 +213,11 @@ function mapEvent(row: {
 }): EventRow {
   return {
     id: row.id,
+    academic_term_id: row.academic_term_id,
     name: row.name,
-    event_date: eventDateFromRow(row.event_date),
-    last_session_date: row.last_session_date ? eventDateFromRow(row.last_session_date) : undefined,
+    event_status: row.event_status,
+    event_start_date: eventDateFromRow(row.event_start_date),
+    event_end_date: eventDateFromRow(row.event_end_date),
     is_active: row.is_active,
     created_by: row.created_by,
     created_at: row.created_at,
@@ -264,11 +269,11 @@ const STUDENT_SELECT = `
 const EVENT_SELECT = `
   SELECT
     e.${q('eventId')} AS id,
+    e.${q('academicTermId')} AS academic_term_id,
     e.${q('eventName')} AS name,
-    e.${q('eventDate')}::timestamp AS event_date,
-    COALESCE((SELECT MAX(es.${q('startsAtUtc')}::date)
-      FROM ${q('EventSessions')} es WHERE es.${q('eventId')} = e.${q('eventId')}),
-      e.${q('eventDate')})::timestamp AS last_session_date,
+    e.${q('eventStatusCode')} AS event_status,
+    e.${q('eventStartDate')}::timestamp AS event_start_date,
+    e.${q('eventEndDate')}::timestamp AS event_end_date,
     (e.${q('eventStatusCode')} = 'PUBLISHED') AS is_active,
     e.${q('createdByUserId')} AS created_by,
     e.${q('createdAtUtc')} AS created_at,
@@ -777,7 +782,7 @@ export async function deleteStudent(db: Queryable, id: number): Promise<void> {
 export async function listEvents(db: Queryable): Promise<EventRow[]> {
   const rows = await many<Parameters<typeof mapEvent>[0]>(
     db,
-    `${EVENT_SELECT} ORDER BY e.${q('eventDate')} DESC, e.${q('eventId')} DESC`,
+    `${EVENT_SELECT} ORDER BY e.${q('eventStartDate')} DESC, e.${q('eventId')} DESC`,
   );
   return rows.map(mapEvent);
 }
@@ -785,7 +790,7 @@ export async function listEvents(db: Queryable): Promise<EventRow[]> {
 export async function listActiveEvents(db: Queryable): Promise<EventRow[]> {
   const rows = await many<Parameters<typeof mapEvent>[0]>(
     db,
-    `${EVENT_SELECT} WHERE e.${q('eventStatusCode')} = 'PUBLISHED' ORDER BY e.${q('eventDate')} DESC`,
+    `${EVENT_SELECT} WHERE e.${q('eventStatusCode')} = 'PUBLISHED' ORDER BY e.${q('eventStartDate')} DESC`,
   );
   return rows.map(mapEvent);
 }
@@ -1119,6 +1124,97 @@ export async function listEventParticipantCounts(
   return map;
 }
 
+export type EventAttendanceSummary = {
+  event_id: number;
+  registered: number;
+  checked_in: number;
+  not_yet_checked_in: number;
+  sessions: Array<{
+    session_id: number;
+    registered: number;
+    checked_in: number;
+    checked_out: number;
+    pending: number;
+    absent: number;
+    excused: number;
+    is_closed: boolean;
+  }>;
+};
+
+export async function getEventAttendanceSummary(db: Queryable, eventId: number): Promise<EventAttendanceSummary> {
+  const eventCounts = await one<{ registered: string; checked_in: string }>(
+    db,
+    `SELECT COUNT(DISTINCT er.${q('eventRegistrationId')})::text AS registered,
+       COUNT(DISTINCT er.${q('eventRegistrationId')}) FILTER (
+         WHERE st.${q('checkedInAtUtc')} IS NOT NULL
+       )::text AS checked_in
+     FROM ${q('EventRegistrations')} er
+     LEFT JOIN ${q('EventSessions')} es ON es.${q('eventId')} = er.${q('eventId')}
+     LEFT JOIN ${q('AttendanceSessionStatus')} st
+       ON st.${q('eventSessionId')} = es.${q('eventSessionId')}
+       AND st.${q('studentId')} = er.${q('studentId')}
+     WHERE er.${q('eventId')} = $1 AND er.${q('registrationStatusCode')} = 'ACTIVE'`,
+    [eventId],
+  );
+  const sessionCounts = await many<{
+    session_id: number;
+    registered: string;
+    checked_in: string;
+    checked_out: string;
+    pending: string;
+    absent: string;
+    excused: string;
+    is_closed: boolean;
+  }>(
+    db,
+    `SELECT es.${q('eventSessionId')} AS session_id,
+       es.${q('isClosed')} AS is_closed,
+       COUNT(er.${q('eventRegistrationId')})::text AS registered,
+       COUNT(er.${q('eventRegistrationId')}) FILTER (WHERE st.${q('checkedInAtUtc')} IS NOT NULL)::text AS checked_in,
+       COUNT(er.${q('eventRegistrationId')}) FILTER (WHERE st.${q('checkedOutAtUtc')} IS NOT NULL)::text AS checked_out,
+       COUNT(er.${q('eventRegistrationId')}) FILTER (
+         WHERE st.${q('checkedInAtUtc')} IS NULL AND es.${q('isClosed')} = false
+           AND COALESCE(st.${q('isExcused')}, false) = false
+       )::text AS pending,
+       COUNT(er.${q('eventRegistrationId')}) FILTER (
+         WHERE st.${q('checkedInAtUtc')} IS NULL AND es.${q('isClosed')} = true
+           AND COALESCE(st.${q('isExcused')}, false) = false
+       )::text AS absent,
+       COUNT(er.${q('eventRegistrationId')}) FILTER (
+         WHERE COALESCE(st.${q('isExcused')}, false) = true
+       )::text AS excused
+     FROM ${q('EventSessions')} es
+     LEFT JOIN ${q('EventRegistrations')} er
+       ON er.${q('eventId')} = es.${q('eventId')}
+       AND er.${q('registrationStatusCode')} = 'ACTIVE'
+     LEFT JOIN ${q('AttendanceSessionStatus')} st
+       ON st.${q('eventSessionId')} = es.${q('eventSessionId')}
+       AND st.${q('studentId')} = er.${q('studentId')}
+     WHERE es.${q('eventId')} = $1
+     GROUP BY es.${q('eventSessionId')}
+     ORDER BY es.${q('startsAtUtc')}, es.${q('sortOrder')}`,
+    [eventId],
+  );
+  const registered = Number(eventCounts?.registered ?? 0);
+  const checkedIn = Number(eventCounts?.checked_in ?? 0);
+  return {
+    event_id: eventId,
+    registered,
+    checked_in: checkedIn,
+    not_yet_checked_in: registered - checkedIn,
+    sessions: sessionCounts.map((s) => ({
+      session_id: s.session_id,
+      registered: Number(s.registered),
+      checked_in: Number(s.checked_in),
+      checked_out: Number(s.checked_out),
+      pending: Number(s.pending),
+      absent: Number(s.absent),
+      excused: Number(s.excused),
+      is_closed: s.is_closed,
+    })),
+  };
+}
+
 export type EventParticipantRow = {
   student_id: number;
   student_id_code: string | null;
@@ -1142,7 +1238,7 @@ export type EventParticipantRow = {
 export async function listEventParticipants(
   db: Queryable,
   eventId: number,
-  options: { q?: string; page?: number; limit?: number } = {},
+  options: { q?: string; page?: number; limit?: number; sessionId?: number; status?: string } = {},
 ): Promise<{ rows: EventParticipantRow[]; total: number }> {
   const page = Math.max(1, options.page ?? 1);
   const limit = Math.min(500, Math.max(1, options.limit ?? 50));
@@ -1160,6 +1256,28 @@ export async function listEventParticipants(
       LOWER(COALESCE(s.${q('middleName')}, '')) LIKE $${idx} OR
       LOWER(COALESCE(s.${q('studentNumber')}, '')) LIKE $${idx} OR
       LOWER(COALESCE(sec.${q('sectionName')}, '')) LIKE $${idx}
+    )`);
+  }
+
+  if (options.sessionId != null || options.status != null) {
+    const sessionId = options.sessionId!;
+    params.push(sessionId);
+    const sessionParam = params.length;
+    let statusCondition = '';
+    if (options.status != null) {
+      params.push(options.status);
+      const statusParam = params.length;
+      statusCondition = `AND COALESCE(st.${q('attendanceStatusCode')},
+        CASE WHEN es.${q('isClosed')} THEN 'ABSENT' ELSE 'PENDING' END) = $${statusParam}`;
+    }
+    conditions.push(`EXISTS (
+      SELECT 1 FROM ${q('EventSessions')} es
+      LEFT JOIN ${q('AttendanceSessionStatus')} st
+        ON st.${q('eventSessionId')} = es.${q('eventSessionId')}
+        AND st.${q('studentId')} = er.${q('studentId')}
+      WHERE es.${q('eventSessionId')} = $${sessionParam}
+        AND es.${q('eventId')} = er.${q('eventId')}
+        ${statusCondition}
     )`);
   }
 
@@ -1220,7 +1338,8 @@ export async function listEventParticipants(
          es.${q('eventSessionId')} AS session_id,
          es.${q('sessionName')} AS session_name,
          es.${q('startsAtUtc')}::date::text AS session_date,
-         COALESCE(st.${q('attendanceStatusCode')}, 'PENDING') AS status,
+         COALESCE(st.${q('attendanceStatusCode')},
+           CASE WHEN es.${q('isClosed')} THEN 'ABSENT' ELSE 'PENDING' END) AS status,
          st.${q('checkedInAtUtc')} AS checked_in_at_utc,
          st.${q('checkedOutAtUtc')} AS checked_out_at_utc
        FROM ${q('EventRegistrations')} er
@@ -1229,6 +1348,7 @@ export async function listEventParticipants(
          ON st.${q('eventSessionId')} = es.${q('eventSessionId')}
          AND st.${q('studentId')} = er.${q('studentId')}
        WHERE er.${q('eventId')} = $1
+         AND er.${q('registrationStatusCode')} = 'ACTIVE'
          AND er.${q('studentId')} = ANY($2::bigint[])
        ORDER BY es.${q('startsAtUtc')}, es.${q('sortOrder')}`,
       [eventId, rows.map((row) => row.student_id)],
@@ -1645,18 +1765,18 @@ export async function publishEvent(
 
 export async function insertEvent(
   db: Queryable,
-  row: { name: string; eventDate: Date; isActive: boolean; createdBy: number },
+  row: { name: string; eventStartDate: Date; eventEndDate: Date; isActive: boolean; createdBy: number; academicTermId?: number | null },
 ): Promise<EventRow> {
-  const term = await defaultTermId(db);
+  const term = row.academicTermId ?? (await defaultTermId(db));
   const code = `EVT-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 1000)}`;
   const created = await one<{ event_id: number }>(
     db,
     `INSERT INTO ${q('Events')} (
-        ${q('academicTermId')}, ${q('eventCode')}, ${q('eventName')}, ${q('eventDate')},
+        ${q('academicTermId')}, ${q('eventCode')}, ${q('eventName')}, ${q('eventStartDate')}, ${q('eventEndDate')},
         ${q('eventStatusCode')}, ${q('createdByUserId')}
-     ) VALUES ($1, $2, $3, $4::date, $5, $6)
+     ) VALUES ($1, $2, $3, $4::date, $5::date, $6, $7)
      RETURNING ${q('eventId')} AS event_id`,
-    [term, code.slice(0, 50), row.name, row.eventDate, 'DRAFT', row.createdBy],
+    [term, code.slice(0, 50), row.name, row.eventStartDate, row.eventEndDate, 'DRAFT', row.createdBy],
   );
   return (await getEventById(db, created!.event_id))!;
 }
@@ -1664,7 +1784,7 @@ export async function insertEvent(
 export async function updateEvent(
   db: Queryable,
   id: number,
-  fields: { name?: string; eventDate?: Date; isActive?: boolean },
+  fields: { name?: string; eventStartDate?: Date; eventEndDate?: Date; isActive?: boolean; academicTermId?: number | null },
 ): Promise<EventRow> {
   const existing = (await getEventById(db, id))!;
   const sets: string[] = [`${q('updatedAtUtc')} = clock_timestamp()`];
@@ -1674,16 +1794,24 @@ export async function updateEvent(
     sets.push(`${q('eventName')} = $${i++}`);
     values.push(fields.name);
   }
-  if (fields.eventDate != null) {
-    sets.push(`${q('eventDate')} = $${i++}::date`);
-    values.push(fields.eventDate);
+  if (fields.eventStartDate != null) {
+    sets.push(`${q('eventStartDate')} = $${i++}::date`);
+    values.push(fields.eventStartDate);
+  }
+  if (fields.eventEndDate != null) {
+    sets.push(`${q('eventEndDate')} = $${i++}::date`);
+    values.push(fields.eventEndDate);
+  }
+  if (fields.academicTermId !== undefined) {
+    sets.push(`${q('academicTermId')} = $${i++}`);
+    values.push(fields.academicTermId);
   }
   if (sets.length > 1) {
     values.push(id);
     await db.query(`UPDATE ${q('Events')} SET ${sets.join(', ')} WHERE ${q('eventId')} = $${i}`, values);
   }
 
-  if (fields.eventDate != null) {
+  if (fields.eventStartDate != null || fields.eventEndDate != null) {
     const windows = await windowsForEvent(db, id);
     for (const w of windows) {
       await updateWindow(db, w.id, {
@@ -1710,9 +1838,22 @@ function pgErrCode(err: unknown): string {
 
 /** Ignore missing tables/columns/triggers so wipe works on both schema.ts and the SQL install. */
 async function ignoreMissingRelation(db: Queryable, sql: string, values: unknown[] = []): Promise<void> {
+  const sp = `sp_${Math.random().toString(36).slice(2, 8)}`;
+  let hasSavepoint = false;
+  try {
+    await db.query(`SAVEPOINT ${sp}`);
+    hasSavepoint = true;
+  } catch (err) {
+    // Pool queries run in autocommit mode; SAVEPOINT is only available on a transaction client.
+    if (pgErrCode(err) !== '25P01') throw err;
+  }
   try {
     await db.query(sql, values);
+    if (hasSavepoint) await db.query(`RELEASE SAVEPOINT ${sp}`);
   } catch (err) {
+    if (hasSavepoint) {
+      try { await db.query(`ROLLBACK TO SAVEPOINT ${sp}`); } catch {}
+    }
     const code = pgErrCode(err);
     if (code !== '42P01' && code !== '42703' && code !== '42704') throw err;
   }
@@ -1801,27 +1942,39 @@ export async function deleteEvent(db: Queryable, id: number): Promise<void> {
   }
 }
 
-export async function deactivateEvent(db: Queryable, id: number): Promise<void> {
-  await db.query(
-    `UPDATE ${q('EventSessions')} SET ${q('isClosed')} = TRUE WHERE ${q('eventId')} = $1`,
-    [id],
-  );
-  await db.query(
-    `INSERT INTO ${q('AttendanceRecords')} (${q('eventParticipantId')}, ${q('lastChangedByUserId')})
-     SELECT ep.${q('eventParticipantId')}, e.${q('createdByUserId')}
-     FROM ${q('EventParticipants')} ep
-     JOIN ${q('EventSessions')} es ON es.${q('eventSessionId')} = ep.${q('eventSessionId')}
-     JOIN ${q('Events')} e ON e.${q('eventId')} = es.${q('eventId')}
-     WHERE e.${q('eventId')} = $1
-     ON CONFLICT (${q('eventParticipantId')}) DO NOTHING`,
-    [id],
-  );
+export async function deactivateEvent(
+  db: Queryable, id: number, actorUserId?: number,
+): Promise<{ assessmentsCreated: number; totalAmountAssessed: number }> {
+  const event = await one<{ status: string; creator_id: number }>(db,
+    `SELECT ${q('eventStatusCode')} AS status, ${q('createdByUserId')} AS creator_id
+     FROM ${q('Events')} WHERE ${q('eventId')} = $1 FOR UPDATE`, [id]);
+  if (!event) throw badRequest('Event not found');
+  if (event.status === 'CLOSED') return { assessmentsCreated: 0, totalAmountAssessed: 0 };
+  if (event.status !== 'PUBLISHED') throw conflict('Only published events can be closed');
+  const unfinished = await one<{ count: number }>(db,
+    `SELECT COUNT(*)::int AS count FROM ${q('EventSessions')}
+     WHERE ${q('eventId')} = $1 AND ${q('endsAtUtc')} > clock_timestamp()`, [id]);
+  if (unfinished?.count) throw conflict('Wait until every session has ended before closing the event');
+  const sessions = await many<{ id: number }>(db,
+    `SELECT ${q('eventSessionId')} AS id FROM ${q('EventSessions')}
+     WHERE ${q('eventId')} = $1 ORDER BY ${q('startsAtUtc')}, ${q('eventSessionId')}`, [id]);
+  let assessmentsCreated = 0;
+  let totalAmountAssessed = 0;
+  for (const session of sessions) {
+    const result = await closeSessionAndAssessFines(db, session.id, actorUserId ?? event.creator_id);
+    assessmentsCreated += result.assessmentsCreated;
+    totalAmountAssessed += result.totalAmountAssessed;
+  }
   await db.query(
     `UPDATE ${q('Events')}
      SET ${q('eventStatusCode')} = 'CLOSED', ${q('updatedAtUtc')} = clock_timestamp()
      WHERE ${q('eventId')} = $1`,
     [id],
   );
+  await db.query(
+    `UPDATE ${q('EventFinePolicies')} SET ${q('policyStatusCode')} = 'CLOSED'
+     WHERE ${q('eventId')} = $1 AND ${q('policyStatusCode')} = 'ACTIVE'`, [id]);
+  return { assessmentsCreated, totalAmountAssessed: Math.round(totalAmountAssessed * 100) / 100 };
 }
 
 export async function windowsForEvent(db: Queryable, eventId: number): Promise<SessionWindowRow[]> {
@@ -1939,7 +2092,7 @@ export async function insertWindow(
   if (!event) throw new Error('Event not found');
   const termId = await eventTermId(db, row.eventId);
   const bounds = sessionBounds(
-    row.sessionDate ?? event.event_date,
+    row.sessionDate ?? event.event_start_date,
     row.startTime,
     row.endTime,
     row.lateAfter,
@@ -2008,7 +2161,7 @@ export async function updateWindow(
   const event = await getEventById(db, existing.event_id);
   if (!event) throw new Error('Event not found');
   const bounds = sessionBounds(
-    fields.sessionDate ?? (existing.session_date ? new Date(`${existing.session_date}T00:00:00`) : event.event_date),
+    fields.sessionDate ?? (existing.session_date ? new Date(`${existing.session_date}T00:00:00`) : event.event_start_date),
     fields.startTime,
     fields.endTime,
     fields.lateAfter !== undefined ? fields.lateAfter : existing.late_after,
@@ -2692,7 +2845,7 @@ export async function getEventFinePolicy(db: Queryable, eventId: number): Promis
           policy_code: policy.policy_code,
           policy_name: policy.policy_name,
           currency_code: policy.currency_code,
-          maximum_fine_per_student: policy.maximum_fine_per_student ? Number(policy.maximum_fine_per_student) : null,
+          maximum_fine_per_student: policy.maximum_fine_per_student == null ? null : Number(policy.maximum_fine_per_student),
           status: policy.policy_status_code,
         }
       : null,
@@ -3020,7 +3173,8 @@ export async function upsertCompositeEvent(
     academicTermId?: number;
     eventCode: string;
     eventName: string;
-    eventDate?: string | Date;
+    eventStartDate?: string | Date;
+    eventEndDate?: string | Date;
     actorUserId: number;
     sessions?: CompositeSessionInput[];
     audienceRules?: CompositeAudienceRuleInput[];
@@ -3028,20 +3182,22 @@ export async function upsertCompositeEvent(
   },
 ): Promise<number> {
   const termId = params.academicTermId ?? (await defaultTermId(db));
-  const eventDate = params.eventDate ?? new Date();
+  const eventStartDate = params.eventStartDate ?? new Date();
+  const eventEndDate = params.eventEndDate ?? eventStartDate;
 
   let eventId = params.eventId;
   if (!eventId) {
     const created = await one<{ eventId: number }>(
       db,
       `INSERT INTO ${q('Events')} (
-         ${q('academicTermId')}, ${q('eventCode')}, ${q('eventName')}, ${q('eventDate')}, ${q('eventStatusCode')}, ${q('createdByUserId')}
-       ) VALUES ($1, $2, $3, $4, 'DRAFT', $5)
+         ${q('academicTermId')}, ${q('eventCode')}, ${q('eventName')}, ${q('eventStartDate')}, ${q('eventEndDate')}, ${q('eventStatusCode')}, ${q('createdByUserId')}
+       ) VALUES ($1, $2, $3, $4, $5, 'DRAFT', $6)
        ON CONFLICT (${q('eventCode')}) DO UPDATE
        SET ${q('eventName')} = EXCLUDED.${q('eventName')},
-           ${q('eventDate')} = EXCLUDED.${q('eventDate')}
+           ${q('eventStartDate')} = EXCLUDED.${q('eventStartDate')},
+           ${q('eventEndDate')} = EXCLUDED.${q('eventEndDate')}
        RETURNING ${q('eventId')}`,
-      [termId, params.eventCode, params.eventName, eventDate, params.actorUserId],
+      [termId, params.eventCode, params.eventName, eventStartDate, eventEndDate, params.actorUserId],
     );
     eventId = created!.eventId;
   } else {
@@ -3049,9 +3205,10 @@ export async function upsertCompositeEvent(
       `UPDATE ${q('Events')}
        SET ${q('eventName')} = $1,
            ${q('eventCode')} = $2,
-           ${q('eventDate')} = COALESCE($3, ${q('eventDate')})
-       WHERE ${q('eventId')} = $4`,
-      [params.eventName, params.eventCode, params.eventDate, eventId],
+           ${q('eventStartDate')} = COALESCE($3, ${q('eventStartDate')}),
+           ${q('eventEndDate')} = COALESCE($4, ${q('eventEndDate')})
+       WHERE ${q('eventId')} = $5`,
+      [params.eventName, params.eventCode, params.eventStartDate, params.eventEndDate, eventId],
     );
   }
 
@@ -3336,10 +3493,26 @@ export async function closeSessionAndAssessFines(
   sessionId: number,
   actorUserId: number,
 ): Promise<{ assessmentsCreated: number; totalAmountAssessed: number }> {
-  await db.query(
-    `UPDATE ${q('EventSessions')} SET ${q('isClosed')} = TRUE WHERE ${q('eventSessionId')} = $1`,
-    [sessionId],
-  );
+  const session = await one<{ event_id: number }>(db,
+    `UPDATE ${q('EventSessions')} s SET ${q('isClosed')} = TRUE
+     FROM ${q('Events')} e
+     WHERE s.${q('eventSessionId')} = $1 AND s.${q('isClosed')} = FALSE
+       AND s.${q('eventId')} = e.${q('eventId')}
+       AND e.${q('eventStatusCode')} = 'PUBLISHED'
+       AND s.${q('endsAtUtc')} <= clock_timestamp()
+     RETURNING s.${q('eventId')} AS event_id`, [sessionId]);
+  if (!session) {
+    const exists = await one<{ id: number; closed: boolean; ends_at: Date; event_status: string }>(db,
+      `SELECT s.${q('eventSessionId')} AS id, s.${q('isClosed')} AS closed,
+         s.${q('endsAtUtc')} AS ends_at, e.${q('eventStatusCode')} AS event_status
+       FROM ${q('EventSessions')} s JOIN ${q('Events')} e ON e.${q('eventId')} = s.${q('eventId')}
+       WHERE s.${q('eventSessionId')} = $1`, [sessionId]);
+    if (!exists) throw badRequest('Session not found');
+    if (exists.closed) return { assessmentsCreated: 0, totalAmountAssessed: 0 };
+    if (exists.event_status !== 'PUBLISHED') throw conflict('Only published events can have sessions closed');
+    if (exists.ends_at > new Date()) throw conflict('Wait until the session has ended before closing it');
+    return { assessmentsCreated: 0, totalAmountAssessed: 0 };
+  }
   await db.query(
     `INSERT INTO ${q('AttendanceRecords')} (${q('eventParticipantId')}, ${q('lastChangedByUserId')})
      SELECT ep.${q('eventParticipantId')}, $2
@@ -3348,38 +3521,150 @@ export async function closeSessionAndAssessFines(
      ON CONFLICT (${q('eventParticipantId')}) DO NOTHING`,
     [sessionId, actorUserId],
   );
-  const procedure = await one<{ available: string | null }>(
-    db,
-    `SELECT to_regprocedure('ssc.sp_student_fine_assess_closed_session(bigint,integer,integer,numeric)')::text AS available`,
-  );
   const fineTables = await one<{ policy: string | null; assessments: string | null }>(
     db,
     `SELECT to_regclass('"EventFinePolicies"')::text AS policy,
        to_regclass('"StudentFineAssessments"')::text AS assessments`,
   );
-  const finePolicy = fineTables?.policy ? await one<{ active: boolean }>(
-    db,
-    `SELECT EXISTS (
-       SELECT 1 FROM ${q('EventFinePolicies')} p
-       JOIN ${q('EventSessions')} s ON s.${q('eventId')} = p.${q('eventId')}
-       WHERE s.${q('eventSessionId')} = $1 AND p.${q('policyStatusCode')} = 'ACTIVE'
-     ) AS active`,
-    [sessionId],
-  ) : null;
-  if (procedure?.available && finePolicy?.active) {
-    await db.query(`CALL ssc.sp_student_fine_assess_closed_session($1, $2, 0, 0)`, [sessionId, actorUserId]);
+  if (!fineTables?.policy) return { assessmentsCreated: 0, totalAmountAssessed: 0 };
+  // Lock the event policy so concurrent session closures share one cap calculation.
+  const policy = await one<{ policy_id: number; currency: string; cap: number | null }>(db,
+    `SELECT ${q('eventFinePolicyId')} AS policy_id, ${q('currencyCode')} AS currency,
+       ${q('maximumFinePerStudent')} AS cap FROM ${q('EventFinePolicies')}
+     WHERE ${q('eventId')} = $1 AND ${q('policyStatusCode')} = 'ACTIVE' FOR UPDATE`, [session.event_id]);
+  if (!policy) return { assessmentsCreated: 0, totalAmountAssessed: 0 };
+  if (!fineTables.assessments) throw new Error('Fine assessment tables are not installed');
+  const input = await loadFineCalculationInput(db, session.event_id, sessionId);
+  const rows = calculateFines({ ...input, maximumPerStudent: policy.cap == null ? null : Number(policy.cap) });
+  let assessmentsCreated = 0;
+  let totalAmountAssessed = 0;
+  for (const row of rows) {
+    const inserted = await one<{ id: number }>(db,
+      `INSERT INTO ${q('StudentFineAssessments')} (
+         ${q('eventParticipantId')}, ${q('eventSessionId')}, ${q('violationCode')},
+         ${q('assessedAmount')}, ${q('currencyCode')}, ${q('assessmentStatusCode')}, ${q('assessedByUserId')})
+       VALUES ($1, $2, $3, $4, $5, 'ASSESSED', $6)
+       ON CONFLICT (${q('eventParticipantId')}, ${q('violationCode')}) DO NOTHING
+       RETURNING ${q('studentFineAssessmentId')} AS id`,
+      [row.participantId, row.sessionId, row.violationCode, row.amount, policy.currency, actorUserId]);
+    if (!inserted) continue;
+    await db.query(
+      `INSERT INTO ${q('StudentFineStatusHistory')} (
+         ${q('studentFineAssessmentId')}, ${q('fromStatusCode')}, ${q('toStatusCode')},
+         ${q('changeReason')}, ${q('changedByUserId')})
+       VALUES ($1, NULL, 'ASSESSED', 'Automatic fine assessment on session close', $2)`,
+      [inserted.id, actorUserId]);
+    assessmentsCreated++;
+    totalAmountAssessed += row.amount;
   }
-  const totals = fineTables?.assessments ? await one<{ count: number; total: number }>(
-    db,
-    `SELECT COUNT(*)::int AS count, COALESCE(SUM(${q('assessedAmount')}), 0.00)::numeric AS total
-     FROM ${q('StudentFineAssessments')}
-     WHERE ${q('eventSessionId')} = $1`,
-    [sessionId],
-  ) : null;
+  return { assessmentsCreated, totalAmountAssessed: Math.round(totalAmountAssessed * 100) / 100 };
+}
+
+async function loadFineCalculationInput(db: Queryable, eventId: number, sessionId?: number): Promise<{
+  statuses: FineStatus[]; rules: FineRule[]; existing: FineAssessment[];
+}> {
+  const statusRows = await many<any>(db,
+    `SELECT p.${q('eventParticipantId')} AS participant_id, p.${q('studentId')} AS student_id,
+       s.${q('eventSessionId')} AS session_id, s.${q('startsAtUtc')} AS starts_at,
+       s.${q('endsAtUtc')} AS ends_at, s.${q('isClosed')} AS is_closed,
+       s.${q('requiresCheckOut')} AS requires_checkout, s.${q('lateAfterUtc')} AS late_after_at,
+       p.${q('isRequired')} AS is_required, COALESCE(a.${q('isExcused')}, FALSE) AS is_excused,
+       a.${q('checkedInAtUtc')} AS checked_in_at, a.${q('checkedOutAtUtc')} AS checked_out_at
+     FROM ${q('EventParticipants')} p
+     JOIN ${q('EventSessions')} s ON s.${q('eventSessionId')} = p.${q('eventSessionId')}
+     LEFT JOIN ${q('AttendanceRecords')} a ON a.${q('eventParticipantId')} = p.${q('eventParticipantId')}
+     WHERE s.${q('eventId')} = $1 AND ($2::bigint IS NULL OR s.${q('eventSessionId')} = $2)`,
+    [eventId, sessionId ?? null]);
+  const ruleRows = await many<any>(db,
+    `SELECT r.${q('eventSessionId')} AS session_id, r.${q('violationCode')} AS violation_code,
+       COALESCE(o.${q('fineAmount')}, r.${q('fineAmount')}) AS amount,
+       r.${q('priorityOrder')} AS priority
+     FROM ${q('EventFineRules')} r
+     JOIN ${q('EventFinePolicies')} p ON p.${q('eventFinePolicyId')} = r.${q('eventFinePolicyId')}
+     LEFT JOIN ${q('EventFineRuleOverrides')} o ON o.${q('eventFineRuleId')} = r.${q('eventFineRuleId')}
+     WHERE p.${q('eventId')} = $1 AND p.${q('policyStatusCode')} = 'ACTIVE'
+       AND r.${q('isActive')} = TRUE AND ($2::bigint IS NULL OR r.${q('eventSessionId')} = $2)`,
+    [eventId, sessionId ?? null]);
+  const existingRows = await many<any>(db,
+    `SELECT a.${q('eventParticipantId')} AS participant_id, p.${q('studentId')} AS student_id,
+       a.${q('eventSessionId')} AS session_id, a.${q('violationCode')} AS violation_code,
+       a.${q('assessedAmount')} AS amount
+     FROM ${q('StudentFineAssessments')} a
+     JOIN ${q('EventParticipants')} p ON p.${q('eventParticipantId')} = a.${q('eventParticipantId')}
+     JOIN ${q('EventSessions')} s ON s.${q('eventSessionId')} = a.${q('eventSessionId')}
+     WHERE s.${q('eventId')} = $1`, [eventId]);
   return {
-    assessmentsCreated: totals?.count ?? 0,
-    totalAmountAssessed: Number(totals?.total ?? 0),
+    statuses: statusRows.map((r) => ({ participantId: Number(r.participant_id), studentId: Number(r.student_id),
+      sessionId: Number(r.session_id), sessionStartsAt: new Date(r.starts_at), sessionEndsAt: new Date(r.ends_at),
+      isClosed: r.is_closed, requiresCheckout: r.requires_checkout, isRequired: r.is_required,
+      isExcused: r.is_excused, checkedInAt: r.checked_in_at ? new Date(r.checked_in_at) : null,
+      checkedOutAt: r.checked_out_at ? new Date(r.checked_out_at) : null, lateAfterAt: new Date(r.late_after_at) })),
+    rules: ruleRows.map((r) => ({ sessionId: Number(r.session_id), violationCode: r.violation_code,
+      amount: Number(r.amount), priority: Number(r.priority) })),
+    existing: existingRows.map((r) => ({ participantId: Number(r.participant_id), studentId: Number(r.student_id),
+      sessionId: Number(r.session_id), violationCode: r.violation_code, amount: Number(r.amount) })),
   };
+}
+
+export async function getEventFineReport(db: Queryable, eventId: number): Promise<any | null> {
+  const event = await getEventById(db, eventId);
+  if (!event) return null;
+  const available = await one<{ policy: string | null; balances: string | null }>(db,
+    `SELECT to_regclass('"EventFinePolicies"')::text AS policy,
+       to_regclass('"VwStudentFineBalances"')::text AS balances`);
+  if (!available?.policy || !available.balances) {
+    return { event_id: eventId, event_name: event.name, available: false, policy: null,
+      rules: [], assessments: [], preview: [] };
+  }
+  const policy = await one<any>(db,
+    `SELECT ${q('policyName')} AS name, ${q('policyStatusCode')} AS status,
+       ${q('currencyCode')} AS currency, ${q('maximumFinePerStudent')} AS maximum_per_student
+     FROM ${q('EventFinePolicies')} WHERE ${q('eventId')} = $1`, [eventId]);
+  const configured = policy ? await getEventFinePolicy(db, eventId) : null;
+  const assessments = await many<any>(db,
+    `SELECT b.${q('studentFineAssessmentId')} AS assessment_id,
+       b.${q('studentId')} AS student_id, b.${q('studentNumber')} AS student_number,
+       st.${q('firstName')} AS first_name, st.${q('lastName')} AS last_name,
+       b.${q('eventSessionId')} AS session_id, s.${q('sessionName')} AS session_name,
+       b.${q('violationCode')} AS violation_code,
+       b.${q('assessmentStatusCode')} AS status, b.${q('assessedAmount')} AS assessed_amount,
+       b.${q('confirmedPaidAmount')} AS paid_amount,
+       b.${q('outstandingAmount')} AS outstanding_amount
+     FROM ${q('VwStudentFineBalances')} b
+     JOIN ${q('EventSessions')} s ON s.${q('eventSessionId')} = b.${q('eventSessionId')}
+     JOIN ${q('Students')} st ON st.${q('studentId')} = b.${q('studentId')}
+     WHERE s.${q('eventId')} = $1
+     ORDER BY s.${q('startsAtUtc')}, st.${q('lastName')}, st.${q('firstName')}, b.${q('violationCode')}`,
+    [eventId]);
+  let preview: any[] = [];
+  if (policy?.status === 'ACTIVE') {
+    const input = await loadFineCalculationInput(db, eventId);
+    const eligible = input.statuses.filter((s) => !s.isClosed && s.sessionEndsAt <= new Date());
+    const sessions = await many<{ session_id: number; session_name: string }>(db,
+      `SELECT ${q('eventSessionId')} AS session_id, ${q('sessionName')} AS session_name
+       FROM ${q('EventSessions')} WHERE ${q('eventId')} = $1`, [eventId]);
+    const students = await many<{ student_id: number; student_number: string; first_name: string; last_name: string }>(db,
+      `SELECT DISTINCT st.${q('studentId')} AS student_id, st.${q('studentNumber')} AS student_number,
+         st.${q('firstName')} AS first_name, st.${q('lastName')} AS last_name
+       FROM ${q('Students')} st JOIN ${q('EventParticipants')} p ON p.${q('studentId')} = st.${q('studentId')}
+       JOIN ${q('EventSessions')} s ON s.${q('eventSessionId')} = p.${q('eventSessionId')}
+       WHERE s.${q('eventId')} = $1`, [eventId]);
+    const sessionNames = new Map(sessions.map((s) => [Number(s.session_id), s.session_name]));
+    const studentNames = new Map(students.map((s) => [Number(s.student_id), s]));
+    preview = calculateFines({ ...input, statuses: eligible,
+      maximumPerStudent: policy.maximum_per_student == null ? null : Number(policy.maximum_per_student) })
+      .map((r) => ({ student_id: r.studentId,
+        student_number: studentNames.get(r.studentId)?.student_number ?? '',
+        first_name: studentNames.get(r.studentId)?.first_name ?? '',
+        last_name: studentNames.get(r.studentId)?.last_name ?? '',
+        session_id: r.sessionId, session_name: sessionNames.get(r.sessionId) ?? '',
+        violation_code: r.violationCode, amount: r.amount }));
+  }
+  return { event_id: eventId, event_name: event.name, available: true,
+    policy: policy ? { ...policy, maximum_per_student: policy.maximum_per_student == null ? null : Number(policy.maximum_per_student) } : null,
+    rules: configured?.sessions ?? [],
+    assessments: assessments.map((r) => ({ ...r, assessed_amount: Number(r.assessed_amount),
+      paid_amount: Number(r.paid_amount), outstanding_amount: Number(r.outstanding_amount) })), preview };
 }
 
 export async function listStudentFineBalances(
@@ -3420,7 +3705,7 @@ export async function listStudentFineBalances(
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   return many<any>(
     db,
-    `SELECT * FROM ssc."VwStudentFineBalances" ${where} ORDER BY "studentFineAssessmentId" DESC`,
+    `SELECT * FROM ${q('VwStudentFineBalances')} ${where} ORDER BY "studentFineAssessmentId" DESC`,
     values,
   );
 }

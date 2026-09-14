@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { BookOpen, Calendar, GraduationCap, Layers, Plus, Search, Users, X } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
 
 import { Button, EmptyState, Field, Modal, TableSkeleton } from '../../components/ui'
 import { api } from '../../lib/api'
@@ -366,6 +367,7 @@ function SectionRosterModal({
 }
 
 export function AdminSections() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [query, setQuery] = useState('')
   const [hierarchy, setHierarchy] = useState<AcademicYear[] | null>(null)
   const [sections, setSections] = useState<Section[] | null>(null)
@@ -400,6 +402,14 @@ export function AdminSections() {
     void loadData()
   }, [debounced])
 
+  useEffect(() => {
+    const next = searchParams.get('new')
+    if (next === 'program' || next === 'term' || next === 'year') {
+      setCreateModal(next)
+      setSearchParams({}, { replace: true })
+    }
+  }, [searchParams, setSearchParams])
+
   // Filter sections by active tree selection
   const filteredSections = useMemo(() => {
     if (!sections) return []
@@ -431,8 +441,8 @@ export function AdminSections() {
     <>
       <div className="page-head">
         <div>
-          <h2>Sections & Roster</h2>
-          <p>Browse sections by Academic Year, Term, and Program</p>
+          <h2>Academics</h2>
+          <p>Manage academic years, terms, programs, sections, and class rosters.</p>
         </div>
         <div className="toolbar" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
           <Button variant="secondary" onClick={() => setCreateModal('program')}>

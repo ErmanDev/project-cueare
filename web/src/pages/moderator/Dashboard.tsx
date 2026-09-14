@@ -61,7 +61,11 @@ export function ModeratorDashboard() {
               <h3 className="grow">{selected.name}</h3>
               {selected.is_today ? <span className="chip chip-today">Today</span> : null}
             </div>
-            <p>{fmtWeekday(selected.event_date)}</p>
+            <p>
+              {selected.event_start_date === selected.event_end_date
+                ? fmtWeekday(selected.event_start_date)
+                : `${fmtWeekday(selected.event_start_date)} - ${fmtWeekday(selected.event_end_date)}`}
+            </p>
             <div className="windows">
               {selected.session_windows.map((w) => (
                 <span

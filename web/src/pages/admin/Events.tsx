@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ClipboardCheck, Filter, Pencil, Plus, Search, Trash2, UserCheck, Users, X } from 'lucide-react'
+import { ClipboardCheck, Coins, Filter, LockKeyhole, Pencil, Plus, Search, Trash2, UserCheck, Users, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 import { EventRosterModal } from '../../components/EventRosterModal'
@@ -7,7 +7,7 @@ import { Button, EmptyState, Field, FormActions, Modal, TableSkeleton, onSubmit 
 import { api } from '../../lib/api'
 import { fmtRange, fmtWeekday, hhmmFromMinutes, isToday, minutes, phpAmount, ymd } from '../../lib/format'
 import { useToast } from '../../lib/toast'
-import type { Event, FineTemplate, WindowDraft } from '../../lib/types'
+import type { AcademicTerm, Event, FineTemplate, WindowDraft } from '../../lib/types'
 
 const defaultWindows: WindowDraft[] = [
   { label: 'Morning', start: '07:00', end: '12:00', late_after: '07:30', in_end: '08:30', out_start: '11:30', out_end: '12:30' },
@@ -51,7 +51,7 @@ function validateWindows(windows: WindowDraft[], eventDate: string): string | nu
 }
 
 function hasSessionToday(event: Event): boolean {
-  return event.session_windows.some((w) => isToday(w.session_date || event.event_date))
+  return event.session_windows.some((w) => isToday(w.session_date || event.event_start_date))
 }
 
 function sessionLabel(code: string): string {
@@ -89,12 +89,24 @@ export function AdminEvents() {
     void load()
   }, [])
 
-  async function toggleActive(e: Event) {
+  async function publishEvent(e: Event) {
     try {
-      await api.put(`/admin/events/${e.id}`, { is_active: !e.is_active })
+      await api.put(`/admin/events/${e.id}`, { is_active: true })
+      toast(`Published ${e.name}`)
       await load()
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Update failed', 'error')
+    }
+  }
+
+  async function closeEvent(e: Event) {
+    if (!window.confirm(`Close "${e.name}"? All remaining sessions will close. Missing attendance and event fines will be assessed. This cannot be undone.`)) return
+    try {
+      const result = await api.post<{ assessmentsCreated: number; totalAmountAssessed: number }>(`/admin/events/${e.id}/close`)
+      toast(`Closed ${e.name}; ${result.assessmentsCreated} fine${result.assessmentsCreated === 1 ? '' : 's'} assessed (${phpAmount(result.totalAmountAssessed)})`)
+      await load()
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Event close failed', 'error')
     }
   }
 
@@ -111,8 +123,8 @@ export function AdminEvents() {
   async function closeSession(event: Event, sessionId: number, label: string) {
     if (!window.confirm(`Close "${label}" for "${event.name}"? Unscanned registered students will be marked absent.`)) return
     try {
-      await api.post(`/admin/events/${event.id}/session-windows/${sessionId}/close`)
-      toast(`Closed ${label}; unscanned students marked absent`)
+      const result = await api.post<{ assessmentsCreated: number; totalAmountAssessed: number }>(`/admin/events/${event.id}/session-windows/${sessionId}/close`)
+      toast(`Closed ${label}; ${result.assessmentsCreated} fine${result.assessmentsCreated === 1 ? '' : 's'} assessed (${phpAmount(result.totalAmountAssessed)})`)
       await load()
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Session close failed', 'error')
@@ -281,7 +293,11 @@ export function AdminEvents() {
                       </td>
                       <td>
                         <div className="cell-stack">
-                          <span className={today ? 'today-weight' : undefined}>{fmtWeekday(e.event_date)}</span>
+                          <span className={today ? 'today-weight' : undefined}>
+                            {e.event_start_date === e.event_end_date
+                              ? fmtWeekday(e.event_start_date)
+                              : `${fmtWeekday(e.event_start_date)} - ${fmtWeekday(e.event_end_date)}`}
+                          </span>
                           {today ? <span className="chip chip-today">Today</span> : null}
                         </div>
                       </td>
@@ -298,11 +314,11 @@ export function AdminEvents() {
                                 </span>
                                 {w.is_closed ? (
                                   <span className="chip chip-inactive">Closed</span>
-                                ) : (
+                                ) : e.event_status === 'PUBLISHED' ? (
                                   <button type="button" className="chip chip-inactive" title={`Close ${w.session_label} and mark unscanned students absent`} onClick={() => void closeSession(e, w.id, w.session_label)}>
                                     Close
                                   </button>
-                                )}
+                                ) : null}
                               </span>
                             ))}
                           </div>
@@ -318,15 +334,9 @@ export function AdminEvents() {
                         )}
                       </td>
                       <td>
-                        <button
-                          type="button"
-                          className={e.is_active ? 'chip chip-active' : 'chip chip-inactive'}
-                          aria-pressed={e.is_active}
-                          title={e.is_active ? 'Mark inactive' : 'Mark active'}
-                          onClick={() => void toggleActive(e)}
-                        >
-                          {e.is_active ? 'Active' : 'Inactive'}
-                        </button>
+                        <span className={e.event_status === 'PUBLISHED' ? 'chip chip-active' : 'chip chip-inactive'}>
+                          {e.event_status === 'PUBLISHED' ? 'Active' : e.event_status === 'DRAFT' ? 'Draft' : e.event_status === 'CLOSED' ? 'Closed' : 'Cancelled'}
+                        </span>
                       </td>
                       <td>
                         <div className="menu end">
@@ -354,6 +364,16 @@ export function AdminEvents() {
                           >
                             <ClipboardCheck size={16} />
                           </Link>
+                          <Link to={`/superadmin/events/${e.id}/fines`} className="icon-btn" title="View event fines"
+                            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#b45309' }}>
+                            <Coins size={16} />
+                          </Link>
+                          {e.event_status === 'PUBLISHED' ? <button className="icon-btn" title="Close event and assess remaining fines" onClick={() => void closeEvent(e)}>
+                            <LockKeyhole size={16} />
+                          </button> : null}
+                          {e.event_status === 'DRAFT' ? <button className="icon-btn" title="Publish event" onClick={() => void publishEvent(e)}>
+                            <UserCheck size={16} />
+                          </button> : null}
                           <button className="icon-btn" title="Edit Event" onClick={() => setEditing(e)}>
                             <Pencil size={16} />
                           </button>
@@ -408,14 +428,17 @@ export function EventForm({
   const { toast } = useToast()
   const isEdit = existing != null
   const [name, setName] = useState(existing?.name ?? '')
-  const [date, setDate] = useState(existing ? ymd(existing.event_date) : ymd(new Date()))
+  const [startDate, setStartDate] = useState(existing ? ymd(existing.event_start_date) : ymd(new Date()))
+  const [endDate, setEndDate] = useState(existing ? ymd(existing.event_end_date) : ymd(new Date()))
   const [active, setActive] = useState(existing?.is_active ?? true)
+  const [terms, setTerms] = useState<AcademicTerm[]>([])
+  const [termId, setTermId] = useState(existing?.academic_term_id ? String(existing.academic_term_id) : '')
   const [windows, setWindows] = useState<WindowDraft[]>(
     existing
       ? existing.session_windows.map((w) => ({
           id: w.id,
           label: w.session_label,
-          session_date: w.session_date || ymd(existing.event_date),
+          session_date: w.session_date || ymd(existing.event_start_date),
           start: w.start_time,
           end: w.end_time,
           late_after: w.late_after ?? undefined,
@@ -433,29 +456,112 @@ export function EventForm({
   const published = templates ?? []
   const selectedTemplate = published.find((t) => String(t.template_id) === templateId) ?? null
 
+  // Audience / Attendees selection state
+  const [audienceScope, setAudienceScope] = useState<'ALL_STUDENTS' | 'PROGRAM' | 'YEAR_LEVEL' | 'SECTION'>('ALL_STUDENTS')
+  const [selectedProgramCode, setSelectedProgramCode] = useState<'BSIT' | 'BSBA' | ''>('')
+  const [selectedYearLevel, setSelectedYearLevel] = useState<number>(1)
+  const [selectedSectionId, setSelectedSectionId] = useState<string>('')
+  const [programsList, setProgramsList] = useState<{ academic_program_id: number; program_code: string; program_name: string }[]>([])
+  const [sectionsList, setSectionsList] = useState<{ section_id: number; program_code: string; year_level: number; section_name: string }[]>([])
+
   useEffect(() => {
     void api
       .get<FineTemplate[]>('/admin/fine-templates', { published: 1 })
       .then((list) => setTemplates(list.filter((t) => t.active_version)))
       .catch(() => setTemplates([]))
-  }, [])
+    void api
+      .get<AcademicTerm[]>('/admin/academic-terms')
+      .then((list) => {
+        setTerms(list)
+        setTermId((current) => current || (list[0] ? String(list[0].academic_term_id) : ''))
+      })
+      .catch(() => setTerms([]))
+    void api
+      .get<{ academic_program_id: number; program_code: string; program_name: string }[]>('/admin/academic-programs')
+      .then((list) => setProgramsList(list))
+      .catch(() => setProgramsList([]))
+    void api
+      .get<{ section_id: number; program_code: string; year_level: number; section_name: string }[]>('/admin/sections')
+      .then((list) => setSectionsList(list))
+      .catch(() => setSectionsList([]))
+
+    if (existing) {
+      void api
+        .get<{ audience_rules: { audience_scope_code: string; program_code?: string; year_level?: number; section_id?: number }[] }>(`/admin/events/${existing.id}/audience-rules`)
+        .then((res) => {
+          if (res.audience_rules && res.audience_rules.length > 0) {
+            const r = res.audience_rules[0]
+            if (r.audience_scope_code === 'PROGRAM') {
+              setAudienceScope('PROGRAM')
+              if (r.program_code) setSelectedProgramCode(r.program_code as 'BSIT' | 'BSBA')
+            } else if (r.audience_scope_code === 'YEAR_LEVEL') {
+              setAudienceScope('YEAR_LEVEL')
+              if (r.year_level) setSelectedYearLevel(r.year_level)
+            } else if (r.audience_scope_code === 'SECTION') {
+              setAudienceScope('SECTION')
+              if (r.section_id) setSelectedSectionId(String(r.section_id))
+            }
+          }
+        })
+        .catch(() => {})
+    }
+  }, [existing])
 
   async function save() {
-    const err = validateWindows(windows, date)
+    if (!termId) {
+      toast('Select an academic term', 'error')
+      return
+    }
+    const err = validateWindows(windows, startDate)
     if (err) {
       toast(err, 'error')
       return
     }
+    let audienceRules: { audience_scope_code: string; academic_program_id?: number; year_level?: number; section_id?: number; is_required: boolean }[] = []
+    if (audienceScope === 'ALL_STUDENTS') {
+      audienceRules = [{ audience_scope_code: 'ALL_STUDENTS', is_required: true }]
+    } else if (audienceScope === 'PROGRAM') {
+      if (!selectedProgramCode) {
+        toast('Select a program / course', 'error')
+        return
+      }
+      const prog = programsList.find((p) => p.program_code === selectedProgramCode)
+      if (prog) {
+        audienceRules = [{ audience_scope_code: 'PROGRAM', academic_program_id: prog.academic_program_id, is_required: true }]
+      }
+    } else if (audienceScope === 'YEAR_LEVEL') {
+      audienceRules = [{ audience_scope_code: 'YEAR_LEVEL', year_level: Number(selectedYearLevel), is_required: true }]
+    } else if (audienceScope === 'SECTION') {
+      if (!selectedSectionId) {
+        toast('Select a section', 'error')
+        return
+      }
+      const sec = sectionsList.find((s) => String(s.section_id) === selectedSectionId)
+      if (sec) {
+        const prog = programsList.find((p) => p.program_code === sec.program_code)
+        audienceRules = [{
+          audience_scope_code: 'SECTION',
+          academic_program_id: prog?.academic_program_id,
+          year_level: sec.year_level,
+          section_id: sec.section_id,
+          is_required: true,
+        }]
+      }
+    }
+
     setBusy(true)
     try {
       const payload = {
         name: name.trim(),
-        event_date: date,
+        academic_term_id: Number(termId),
+        event_start_date: startDate,
+        event_end_date: endDate,
         is_active: active,
         fine_template_id: templateId ? Number(templateId) : null,
+        audience_rules: audienceRules,
         session_windows: windows.map((w) => ({
           id: w.id,
-          session_date: w.session_date || date,
+          session_date: w.session_date || startDate,
           session_label: w.label,
           start_time: w.start,
           end_time: w.end,
@@ -496,7 +602,7 @@ export function EventForm({
     }
     const draft: WindowDraft = {
       label: `Session ${windows.length + 1}`,
-      session_date: windows.at(-1)?.session_date || date,
+      session_date: windows.at(-1)?.session_date || startDate,
       start: nextStart,
       end: nextEnd,
       late_after: nextStart,
@@ -526,15 +632,105 @@ export function EventForm({
           <input value={name} onChange={(e) => setName(e.target.value)} required placeholder="e.g. Acquaintance Party 2026" />
         </Field>
         <div className="grid-2">
-          <Field label="Date">
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+          <Field label="Academic term">
+            <select value={termId} onChange={(e) => setTermId(e.target.value)} required>
+              <option value="">Select term</option>
+              {terms.map((term) => (
+                <option key={term.academic_term_id} value={term.academic_term_id}>
+                  {term.term_code} · {term.term_name}
+                </option>
+              ))}
+            </select>
           </Field>
+          <Field label="Start Date">
+            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} required />
+          </Field>
+          <Field label="End Date">
+            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} required min={startDate} />
+          </Field>
+        </div>
+        <div className="grid-2">
           <Field label="Status">
             <select value={active ? '1' : '0'} onChange={(e) => setActive(e.target.value === '1')}>
               <option value="1">Active</option>
               <option value="0">Inactive</option>
             </select>
           </Field>
+        </div>
+
+        {/* Target Attendees Selector */}
+        <div style={{ padding: '0.85rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+          <div style={{ fontWeight: 600, color: '#334155', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <Users size={16} /> Target Attendees (Who will join):
+          </div>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className={`btn ${audienceScope === 'ALL_STUDENTS' ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ padding: '0.3rem 0.75rem', fontSize: '0.8rem', borderRadius: '16px' }}
+              onClick={() => setAudienceScope('ALL_STUDENTS')}
+            >
+              All Enrolled Students
+            </button>
+            <button
+              type="button"
+              className={`btn ${audienceScope === 'PROGRAM' ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ padding: '0.3rem 0.75rem', fontSize: '0.8rem', borderRadius: '16px' }}
+              onClick={() => setAudienceScope('PROGRAM')}
+            >
+              By Course / Program
+            </button>
+            <button
+              type="button"
+              className={`btn ${audienceScope === 'YEAR_LEVEL' ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ padding: '0.3rem 0.75rem', fontSize: '0.8rem', borderRadius: '16px' }}
+              onClick={() => setAudienceScope('YEAR_LEVEL')}
+            >
+              By Year Level
+            </button>
+            <button
+              type="button"
+              className={`btn ${audienceScope === 'SECTION' ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ padding: '0.3rem 0.75rem', fontSize: '0.8rem', borderRadius: '16px' }}
+              onClick={() => setAudienceScope('SECTION')}
+            >
+              By Section
+            </button>
+          </div>
+
+          {audienceScope === 'PROGRAM' && (
+            <Field label="Select Course / Program">
+              <select value={selectedProgramCode} onChange={(e) => setSelectedProgramCode(e.target.value as 'BSIT' | 'BSBA')}>
+                <option value="">Choose Course</option>
+                <option value="BSIT">BSIT - Bachelor of Science in Information Technology</option>
+                <option value="BSBA">BSBA - Bachelor of Science in Business Administration</option>
+              </select>
+            </Field>
+          )}
+
+          {audienceScope === 'YEAR_LEVEL' && (
+            <Field label="Select Year Level">
+              <select value={selectedYearLevel} onChange={(e) => setSelectedYearLevel(Number(e.target.value))}>
+                <option value={1}>1st Year</option>
+                <option value={2}>2nd Year</option>
+                <option value={3}>3rd Year</option>
+                <option value={4}>4th Year</option>
+              </select>
+            </Field>
+          )}
+
+          {audienceScope === 'SECTION' && (
+            <Field label="Select Section">
+              <select value={selectedSectionId} onChange={(e) => setSelectedSectionId(e.target.value)}>
+                <option value="">Choose Section</option>
+                {sectionsList.map((sec) => (
+                  <option key={sec.section_id} value={sec.section_id}>
+                    {sec.program_code} {sec.year_level}-{sec.section_name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
         </div>
 
         {/* Session Window Presets */}
@@ -594,7 +790,7 @@ export function EventForm({
               <Field label="Session Date">
                 <input
                   type="date"
-                  value={w.session_date || date}
+                  value={w.session_date || startDate}
                   onChange={(e) => setWindows((ws) => ws.map((x, j) => (j === i ? { ...x, session_date: e.target.value } : x)))}
                   required
                 />

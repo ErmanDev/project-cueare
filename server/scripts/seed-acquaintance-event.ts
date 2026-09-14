@@ -64,8 +64,8 @@ async function seed() {
     let eventId: number;
     if (eventRes.rows.length === 0) {
       const ne = await client.query(`
-        INSERT INTO ssc."Events" ("academicTermId", "eventCode", "eventName", "eventDate", "eventStatusCode", "createdByUserId")
-        VALUES ($1, $2, $3, $4, 'DRAFT', $5)
+        INSERT INTO ssc."Events" ("academicTermId", "eventCode", "eventName", "eventStartDate", "eventEndDate", "eventStatusCode", "createdByUserId")
+        VALUES ($1, $2, $3, $4, $4, 'DRAFT', $5)
         RETURNING "eventId"
       `, [termId, eventCode, eventName, eventDate, userId]);
       eventId = ne.rows[0].eventId;

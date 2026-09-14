@@ -82,7 +82,9 @@ export function EventRosterModal({
 
   async function loadSections() {
     try {
-      const list = await api.get<SectionOption[]>('/admin/sections')
+      const list = await api.get<SectionOption[]>('/admin/sections', {
+        term_id: event.academic_term_id,
+      })
       setSections(list)
     } catch {
       setSections([])

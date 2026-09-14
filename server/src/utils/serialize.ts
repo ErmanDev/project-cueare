@@ -65,9 +65,11 @@ export function studentToApi(row: {
 export function eventToApi(
   row: {
     id: number;
+    academic_term_id: number;
     name: string;
-    event_date: Date;
-    last_session_date?: Date;
+    event_status: string;
+    event_start_date: Date;
+    event_end_date: Date;
     is_active: boolean;
     created_by: number;
     created_at: Date;
@@ -75,12 +77,14 @@ export function eventToApi(
   },
   now: Date = new Date(),
 ): Record<string, unknown> {
-  const expired = isPastDate(row.last_session_date ?? row.event_date, now);
+  const expired = isPastDate(row.event_end_date, now);
   return {
     id: row.id,
+    academic_term_id: row.academic_term_id,
     name: row.name,
-    event_date: toIso(row.event_date),
-    last_session_date: toIso(row.last_session_date ?? row.event_date),
+    event_status: row.event_status,
+    event_start_date: toIso(row.event_start_date),
+    event_end_date: toIso(row.event_end_date),
     is_active: row.is_active && !expired,
     is_expired: expired,
     created_by: row.created_by,

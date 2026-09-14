@@ -8,28 +8,13 @@ export const SAMPLE_DATA_HEADERS = [
   'MName',
   'COURSE',
   'YrLevel',
-  'USN',
-  'IDAdmission',
-  'SYCode',
-  'Acronym',
-  'AStatus',
-  'Datelog',
-  'AdmissionYrLevel',
-  'ScheduleType',
-  'LearningMode',
   'Sectioning',
 ] as const;
 
 export const PROGRAM_NAMES: Record<string, string> = {
   GEN: 'General',
   BSIT: 'Bachelor of Science in Information Technology',
-  BSCS: 'Bachelor of Science in Computer Science',
-  BSCPE: 'Bachelor of Science in Computer Engineering',
-  BSIS: 'Bachelor of Science in Information Systems',
-  ACT: 'Associate in Computer Technology',
   BSBA: 'Bachelor of Science in Business Administration',
-  BSHM: 'Bachelor of Science in Hospitality Management',
-  BSTM: 'Bachelor of Science in Tourism Management',
 };
 
 export type MappedImportStudent = {

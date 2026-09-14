@@ -67,7 +67,7 @@ describe('mapImportRow', () => {
   });
 
   it('reads the committed sample spreadsheet', () => {
-    const file = path.join(import.meta.dir, '../scripts/sample_data.xls');
+    const file = path.join(import.meta.dir, '../scripts/data.xls');
     const rows = rowsFromSpreadsheet(readFileSync(file));
     expect(Object.keys(rows[0] ?? [])).toEqual([...SAMPLE_DATA_HEADERS]);
     const mapped = mapImportRow(rows[0] ?? {});

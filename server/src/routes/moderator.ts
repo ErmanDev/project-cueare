@@ -38,7 +38,7 @@ moderatorRouter.get(
     const events = await svc.catalog.listActiveEvents();
     const windows = await svc.catalog.listAllWindows();
     const list = events
-      .filter((e) => isTodayOrFuture(e.last_session_date ?? e.event_date, now))
+      .filter((e) => isTodayOrFuture(e.event_end_date, now))
       .map((e) => {
         const ws = windows.filter((w) => w.event_id === e.id);
         const current = pickWindowForTime(ws, now);

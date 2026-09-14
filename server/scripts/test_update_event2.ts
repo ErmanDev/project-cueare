@@ -12,7 +12,8 @@ async function main() {
 
     const updated = await q.updateEvent(pool, 2, {
       name: 'Acquaintance Party 2026',
-      eventDate: existing!.event_date,
+      eventStartDate: existing!.event_start_date,
+      eventEndDate: existing!.event_end_date,
       isActive: true,
     });
     console.log('Updated Event 2 successfully:', updated);

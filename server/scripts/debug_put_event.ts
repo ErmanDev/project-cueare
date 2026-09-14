@@ -8,7 +8,8 @@ async function main() {
     const updated = await withTransaction(pool, async (client) => {
       const event = await q.updateEvent(client, 2, {
         name: 'Acquaintance Party 2026',
-        eventDate: new Date('2026-09-25'),
+        eventStartDate: new Date(2026, 8, 10),
+        eventEndDate: new Date(2026, 8, 10),
         isActive: true,
       });
 

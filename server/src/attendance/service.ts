@@ -186,7 +186,7 @@ export class AttendanceService {
     const t = args.at ?? this.now();
     const eventDay = args.window.session_date
       ? new Date(`${args.window.session_date}T00:00:00`)
-      : args.event.event_date;
+      : args.event.event_start_date;
     if (args.window.is_closed) throw conflict(`Session "${args.window.session_label}" is closed`);
     if (!isSameDay(t, eventDay)) {
       const y = String(eventDay.getFullYear()).padStart(4, '0');
@@ -238,6 +238,21 @@ export class AttendanceService {
     }
   }
 
+  ensureLateManualCheckInAllowed(event: EventRow, window: SessionWindowRow): void {
+    if (window.is_closed) throw conflict(`Session "${window.session_label}" is closed`);
+    const now = this.now();
+    const sessionDay = window.session_date
+      ? new Date(`${window.session_date}T00:00:00`)
+      : event.event_start_date;
+    if (!isSameDay(now, sessionDay)) {
+      throw conflict(`Manual check-in for "${window.session_label}" is only allowed on its session date`);
+    }
+    const start = parseMinutes(window.start_time);
+    if (start == null || minutesOfDay(now) < start) {
+      throw conflict(`Session "${window.session_label}" has not started yet`);
+    }
+  }
+
   async determineDirection(args: {
     eventId: number;
     studentId: number;
@@ -265,10 +280,14 @@ export class AttendanceService {
   }
 
   async ensureEventUsable(event: EventRow, db: Queryable = this.pool): Promise<EventRow> {
-    const finalDate = event.last_session_date ?? event.event_date;
+    const finalDate = event.event_end_date;
     if (isPastDate(finalDate, this.now())) {
       if (event.is_active) {
-        await q.deactivateEvent(db, event.id);
+        if (db === this.pool) {
+          await withTransaction(this.pool, (client) => q.deactivateEvent(client, event.id));
+        } else {
+          await q.deactivateEvent(db, event.id);
+        }
         this.catalog.invalidateEvent(event.id);
       }
       throw conflict(`Event "${event.name}" final session date has passed and is no longer valid`, {
@@ -288,8 +307,12 @@ export class AttendanceService {
       db === this.pool ? await this.catalog.listActiveEvents() : await q.listActiveEvents(db);
     let count = 0;
     for (const event of active) {
-      if (!isPastDate(event.last_session_date ?? event.event_date, this.now())) continue;
-      await q.deactivateEvent(db, event.id);
+      if (!isPastDate(event.event_end_date, this.now())) continue;
+      if (db === this.pool) {
+        await withTransaction(this.pool, (client) => q.deactivateEvent(client, event.id));
+      } else {
+        await q.deactivateEvent(db, event.id);
+      }
       count++;
     }
     if (count > 0) this.catalog.invalidateEvent();
@@ -349,6 +372,7 @@ export class AttendanceService {
     scannedBy: number;
     expectedDirection?: string | null;
     deviceNote?: string | null;
+    allowLateManualCheckIn?: boolean;
   }): Promise<AttendanceLogRow> {
     const note = sanitizeDeviceNote(args.deviceNote);
     return this.writes.run(args.studentId, args.sessionWindowId, () =>
@@ -374,7 +398,12 @@ export class AttendanceService {
           db: client,
           forUpdate: true,
         });
-        this.ensureSessionAcceptingScans({ event, window, direction: result.direction });
+        if (args.allowLateManualCheckIn) {
+          if (args.expectedDirection !== DIRECTION.in) throw badRequest('Manual check-in must record IN');
+          this.ensureLateManualCheckInAllowed(event, window);
+        } else {
+          this.ensureSessionAcceptingScans({ event, window, direction: result.direction });
+        }
         if (!result.canScan) {
           throw conflict(`Already timed IN & OUT for ${window.session_label}`, {
             code: 'ALREADY_COMPLETE',

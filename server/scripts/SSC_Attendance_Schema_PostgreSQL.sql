@@ -130,6 +130,8 @@ CREATE TABLE IF NOT EXISTS "Events" (
     "academicTermId" BIGINT NOT NULL REFERENCES "AcademicTerms"("academicTermId"),
     "eventCode" VARCHAR(50) NOT NULL UNIQUE,
     "eventName" VARCHAR(200) NOT NULL,
+    "eventStartDate" DATE NOT NULL,
+    "eventEndDate" DATE NOT NULL,
     "eventStatusCode" VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
     "createdByUserId" INT NOT NULL REFERENCES "Users"("userId"),
     "createdAtUtc" TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),

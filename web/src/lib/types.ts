@@ -42,6 +42,23 @@ export type EventParticipant = {
   }>
 }
 
+export type EventAttendanceSummary = {
+  event_id: number
+  registered: number
+  checked_in: number
+  not_yet_checked_in: number
+  sessions: Array<{
+    session_id: number
+    registered: number
+    checked_in: number
+    checked_out: number
+    pending: number
+    absent: number
+    excused: number
+    is_closed: boolean
+  }>
+}
+
 export type EventParticipantToken = {
   token_id: number
   event_id: number
@@ -132,9 +149,11 @@ export type EventFineSummary = {
 
 export type Event = {
   id: number
+  academic_term_id: number
   name: string
-  event_date: string
-  last_session_date?: string
+  event_status: 'DRAFT' | 'PUBLISHED' | 'CLOSED' | 'CANCELLED'
+  event_start_date: string
+  event_end_date: string
   is_active: boolean
   is_expired?: boolean
   created_by?: number

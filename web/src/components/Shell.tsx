@@ -20,7 +20,7 @@ const adminNav = [
   { to: '/superadmin', label: 'Home', icon: LayoutDashboard, end: true },
   { to: '/superadmin/events', label: 'Events', icon: CalendarDays },
   { to: '/superadmin/fines', label: 'Fines', icon: Scale },
-  { to: '/superadmin/sections', label: 'Sections', icon: Layers },
+  { to: '/superadmin/academics', label: 'Academics', icon: Layers },
   { to: '/superadmin/students', label: 'Students', icon: GraduationCap },
   { to: '/superadmin/moderators', label: 'Moderators', icon: IdCard },
   { to: '/superadmin/attendance', label: 'Attendance', icon: ClipboardCheck },

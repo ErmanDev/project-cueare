@@ -8,7 +8,7 @@ import { fmtDateTime, fmtRange, fmtTime, fmtWeekday, fmtYearLevel } from '../../
 import { useToast } from '../../lib/toast'
 import type { AttendanceLog, AttendanceQuery, Event, SessionWindow } from '../../lib/types'
 
-export function AdminAttendance() {
+export function AdminAttendance({ embedded = false, onChanged }: { embedded?: boolean; onChanged?: () => void } = {}) {
   const { toast } = useToast()
   const navigate = useNavigate()
   const routeParams = useParams<{ eventId?: string }>()
@@ -33,13 +33,14 @@ export function AdminAttendance() {
   const [exporting, setExporting] = useState(false)
   const [syncingRoster, setSyncingRoster] = useState(false)
 
-  const selected = events.find((e) => e.id === filter.event_id)
+  const effectiveEventId = routeEventId ?? filter.event_id
+  const selected = events.find((e) => e.id === effectiveEventId)
   const windows: SessionWindow[] = selected?.session_windows ?? []
 
   async function load() {
     try {
       const list = await api.get<AttendanceLog[]>('/admin/attendance', {
-        event_id: filter.event_id,
+        event_id: effectiveEventId,
         date: filter.date,
         session_window_id: filter.session_window_id,
         status: filter.status,
@@ -67,7 +68,7 @@ export function AdminAttendance() {
   }, [])
 
   useEffect(() => {
-    if (routeEventId !== filter.event_id) {
+    if (routeEventId !== undefined && routeEventId !== filter.event_id) {
       setFilter((f) => ({ ...f, event_id: routeEventId, session_window_id: undefined }))
     }
   }, [routeEventId])
@@ -81,7 +82,7 @@ export function AdminAttendance() {
 
   useEffect(() => {
     const params: Record<string, string> = {}
-    if (filter.event_id) params.event_id = String(filter.event_id)
+    if (!embedded && filter.event_id) params.event_id = String(filter.event_id)
     if (filter.session_window_id) params.session_window_id = String(filter.session_window_id)
     if (filter.date) params.date = filter.date
     if (filter.status) params.status = filter.status
@@ -91,7 +92,7 @@ export function AdminAttendance() {
 
   useEffect(() => {
     void load()
-  }, [filter.event_id, filter.date, filter.session_window_id, filter.status, filter.q])
+  }, [effectiveEventId, filter.date, filter.session_window_id, filter.status, filter.q])
 
   function handleEventChange(idStr: string) {
     if (!idStr) {
@@ -102,13 +103,14 @@ export function AdminAttendance() {
   }
 
   async function syncRoster() {
-    if (!filter.event_id) return
+    if (!effectiveEventId) return
     setSyncingRoster(true)
     try {
-      const res = await api.post<{ participant_count: number }>(`/admin/events/${filter.event_id}/participants/sync`, {})
+      const res = await api.post<{ participant_count: number }>(`/admin/events/${effectiveEventId}/participants/sync`, {})
       toast(`Synced roster! ${res.participant_count} registered participants`)
       await loadEvents()
       await load()
+      onChanged?.()
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Roster sync failed', 'error')
     } finally {
@@ -128,6 +130,7 @@ export function AdminAttendance() {
       await api.delete(`/admin/attendance/${log.id}`)
       toast('Record deleted')
       await load()
+      onChanged?.()
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Delete failed', 'error')
     }
@@ -137,7 +140,7 @@ export function AdminAttendance() {
     setExporting(true)
     try {
       const csv = await api.getText('/admin/attendance/export', {
-        event_id: filter.event_id,
+        event_id: effectiveEventId,
         date: filter.date,
         session_window_id: filter.session_window_id,
         status: filter.status,
@@ -155,6 +158,7 @@ export function AdminAttendance() {
 
   return (
     <>
+      {!embedded ? <>
       {/* Top Breadcrumb & Event Selection Dropdown */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.75rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -184,7 +188,9 @@ export function AdminAttendance() {
             <option value="">All Events (Global Log)</option>
             {events.map((ev) => (
               <option key={ev.id} value={ev.id}>
-                {ev.name} ({fmtWeekday(ev.event_date)})
+                {ev.name} ({ev.event_start_date === ev.event_end_date
+                  ? fmtWeekday(ev.event_start_date)
+                  : `${fmtWeekday(ev.event_start_date)} - ${fmtWeekday(ev.event_end_date)}`})
               </option>
             ))}
           </select>
@@ -194,7 +200,7 @@ export function AdminAttendance() {
       <div className="page-head">
         <div>
           <h2>{selected ? selected.name : 'All Events Attendance Records'}</h2>
-          <p>{selected ? `Specific Event Attendance Dashboard • ${fmtWeekday(selected.event_date)}` : 'System-wide attendance logs for all events'}</p>
+          <p>{selected ? `Specific Event Attendance Dashboard • ${selected.event_start_date === selected.event_end_date ? fmtWeekday(selected.event_start_date) : `${fmtWeekday(selected.event_start_date)} - ${fmtWeekday(selected.event_end_date)}`}` : 'System-wide attendance logs for all events'}</p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
           {selected ? (
@@ -203,7 +209,7 @@ export function AdminAttendance() {
             </Button>
           ) : null}
           <Button variant="secondary" onClick={() => void exportCsv()} disabled={exporting}>
-            <Download size={16} /> {exporting ? 'Exporting…' : 'Export CSV'}
+            <Download size={16} /> {exporting ? 'Exporting…' : 'Export scan log'}
           </Button>
         </div>
       </div>
@@ -217,7 +223,7 @@ export function AdminAttendance() {
                   {selected.is_active ? 'Active Event' : 'Inactive Event'}
                 </span>
                 <span className="muted" style={{ fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                  <Calendar size={14} /> Schedule: {fmtWeekday(selected.event_date)}
+                  <Calendar size={14} /> Schedule: {selected.event_start_date === selected.event_end_date ? fmtWeekday(selected.event_start_date) : `${fmtWeekday(selected.event_start_date)} - ${fmtWeekday(selected.event_end_date)}`}
                 </span>
               </div>
               <h3 style={{ margin: 0, fontSize: '1.2rem', color: '#0f172a' }}>{selected.name}</h3>
@@ -237,7 +243,7 @@ export function AdminAttendance() {
                   {rows?.length ?? 0}
                 </span>
                 <span style={{ fontSize: '0.75rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                  <CheckCircle2 size={13} /> Scanned Records
+                  <CheckCircle2 size={13} /> Displayed scan records
                 </span>
               </div>
             </div>
@@ -270,6 +276,14 @@ export function AdminAttendance() {
           ) : null}
         </div>
       ) : null}
+      </> : (
+        <div className="page-head" style={{ marginTop: '1.25rem' }}>
+          <div><h3>Scan history</h3><p>Audit log for this event; filters below affect only this table.</p></div>
+          <Button variant="secondary" onClick={() => void exportCsv()} disabled={exporting}>
+            <Download size={16} /> {exporting ? 'Exporting…' : 'Export scan log'}
+          </Button>
+        </div>
+      )}
 
       <div className="filter-bar">
         <div className="search">
@@ -280,7 +294,7 @@ export function AdminAttendance() {
             placeholder="Search student name or ID number..."
           />
         </div>
-        {!selected ? (
+        {!selected && !embedded ? (
           <select
             className="filter-control"
             aria-label="Event"
@@ -372,7 +386,7 @@ export function AdminAttendance() {
                   <th>Year level</th>
                   <th>Sectioning</th>
                   <th>Dir</th>
-                  <th>Event</th>
+                  {!embedded ? <th>Event</th> : null}
                   <th>Session</th>
                   <th>When</th>
                   <th>By</th>
@@ -394,7 +408,7 @@ export function AdminAttendance() {
                     <td>
                       <span className={`dir ${log.direction.toLowerCase()}`}>{log.direction}</span>
                     </td>
-                    <td className="muted">{log.event_name ?? '—'}</td>
+                    {!embedded ? <td className="muted">{log.event_name ?? '—'}</td> : null}
                     <td>{log.session_label ?? `Session #${log.session_window_id}`}</td>
                     <td>{fmtDateTime(log.scanned_at)}</td>
                     <td className="muted">{log.scanned_by_name ?? '—'}</td>
@@ -428,6 +442,7 @@ export function AdminAttendance() {
           onSaved={() => {
             setEditing(null)
             void load()
+            onChanged?.()
           }}
         />
       ) : null}

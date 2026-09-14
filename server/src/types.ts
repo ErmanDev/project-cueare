@@ -62,9 +62,11 @@ export type StudentRow = {
 
 export type EventRow = {
   id: number;
+  academic_term_id: number;
   name: string;
-  event_date: Date;
-  last_session_date?: Date;
+  event_status: string;
+  event_start_date: Date;
+  event_end_date: Date;
   is_active: boolean;
   created_by: number;
   created_at: Date;

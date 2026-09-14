@@ -85,7 +85,8 @@ describe('AttendanceService', () => {
     });
     const event = await q.insertEvent(pool, {
       name: 'Founders Day',
-      eventDate: new Date(2026, 8, 5),
+      eventStartDate: new Date(2026, 8, 5),
+      eventEndDate: new Date(2026, 8, 5),
       isActive: true,
       createdBy: admin.id,
     });
@@ -125,8 +126,166 @@ describe('AttendanceService', () => {
     expect(true).toBe(true);
   });
 
+  it('assesses capped event fines once and reports payment balances', async () => {
+    if (!dbReady) return;
+    await q.addParticipantsToEvent(pool, eventId, [studentId], adminId);
+    const policy = await pool.query<{ id: number }>(
+      `INSERT INTO "EventFinePolicies" ("eventId", "policyCode", "policyName", "currencyCode",
+        "maximumFinePerStudent", "policyStatusCode", "createdByUserId")
+       VALUES ($1, 'TEST', 'Test fines', 'PHP', 50, 'ACTIVE', $2)
+       RETURNING "eventFinePolicyId" AS id`, [eventId, adminId]);
+    const policyId = policy.rows[0]!.id;
+    for (const [code, amount, priority] of [['LATE', 30, 1], ['MISSED_CHECKOUT', 40, 2]] as const) {
+      await pool.query(
+        `INSERT INTO "EventFineRules" ("eventFinePolicyId", "eventId", "eventSessionId",
+          "violationCode", "fineAmount", "priorityOrder") VALUES ($1, $2, $3, $4, $5, $6)`,
+        [policyId, eventId, morningId, code, amount, priority]);
+    }
+    const participant = await pool.query<{ id: number }>(
+      `SELECT "eventParticipantId" AS id FROM "EventParticipants"
+       WHERE "eventSessionId" = $1 AND "studentId" = $2`, [morningId, studentId]);
+    await pool.query(
+      `INSERT INTO "AttendanceRecords" ("eventParticipantId", "checkedInAtUtc", "lastChangedByUserId")
+       SELECT $1, "lateAfterUtc" + interval '1 minute', $2 FROM "EventSessions" WHERE "eventSessionId" = $3`,
+      [participant.rows[0]!.id, adminId, morningId]);
+
+    const estimated = await q.getEventFineReport(pool, eventId);
+    expect(estimated?.preview.map((row: any) => [row.violation_code, row.amount]))
+      .toEqual([['LATE', 30], ['MISSED_CHECKOUT', 20]]);
+
+    expect(await q.closeSessionAndAssessFines(pool, morningId, adminId))
+      .toEqual({ assessmentsCreated: 2, totalAmountAssessed: 50 });
+    expect(await q.closeSessionAndAssessFines(pool, morningId, adminId))
+      .toEqual({ assessmentsCreated: 0, totalAmountAssessed: 0 });
+    const report = await q.getEventFineReport(pool, eventId);
+    expect(report?.assessments.map((row: any) => [row.violation_code, row.assessed_amount]))
+      .toEqual([['LATE', 30], ['MISSED_CHECKOUT', 20]]);
+    const assessmentId = report!.assessments[0]!.assessment_id;
+    const payment = await pool.query<{ id: number }>(
+      `INSERT INTO "FinePayments" ("paymentReference", "paymentMethodCode", "totalAmount", "receivedByUserId")
+       VALUES ('FINE-TEST-1', 'CASH', 10, $1) RETURNING "finePaymentId" AS id`, [adminId]);
+    await pool.query(
+      `INSERT INTO "FinePaymentAllocations" ("finePaymentId", "studentFineAssessmentId", "allocatedAmount")
+       VALUES ($1, $2, 10)`, [payment.rows[0]!.id, assessmentId]);
+    const updated = await q.getEventFineReport(pool, eventId);
+    expect(updated?.assessments[0]).toMatchObject({ paid_amount: 10, outstanding_amount: 20 });
+  });
+
+  it('closes all event sessions, assesses fines, and finalizes the policy once', async () => {
+    if (!dbReady) return;
+    await q.addParticipantsToEvent(pool, eventId, [studentId], adminId);
+    const policy = await pool.query<{ id: number }>(
+      `INSERT INTO "EventFinePolicies" ("eventId", "policyCode", "policyName", "currencyCode",
+        "maximumFinePerStudent", "policyStatusCode", "createdByUserId")
+       VALUES ($1, 'CLOSE', 'Close test', 'PHP', 50, 'ACTIVE', $2)
+       RETURNING "eventFinePolicyId" AS id`, [eventId, adminId]);
+    for (const sessionId of [morningId, afternoonId]) {
+      await pool.query(
+        `INSERT INTO "EventFineRules" ("eventFinePolicyId", "eventId", "eventSessionId",
+          "violationCode", "fineAmount") VALUES ($1, $2, $3, 'ABSENT', 30)`,
+        [policy.rows[0]!.id, eventId, sessionId]);
+    }
+    expect(await q.deactivateEvent(pool, eventId, adminId))
+      .toEqual({ assessmentsCreated: 2, totalAmountAssessed: 50 });
+    expect(await q.deactivateEvent(pool, eventId, adminId))
+      .toEqual({ assessmentsCreated: 0, totalAmountAssessed: 0 });
+    expect((await q.getEventById(pool, eventId))?.event_status).toBe('CLOSED');
+    const report = await q.getEventFineReport(pool, eventId);
+    expect(report?.policy?.status).toBe('CLOSED');
+    expect(report?.assessments.map((row: any) => row.assessed_amount)).toEqual([30, 20]);
+  });
+
+  it('counts unique attendees from current records and scopes roster status to a session', async () => {
+    if (!dbReady) return;
+    const second = await q.insertStudent(pool, {
+      studentIdCode: 'STU-2026-0002', fullName: 'Maria Santos', section: 'BSIT-3A', photoUrl: null,
+    });
+    await q.addParticipantsToEvent(pool, eventId, [second.id], adminId);
+    await q.updateWindow(pool, morningId, { startTime: '07:00', endTime: '12:00', outEnd: '12:30' });
+    service.invalidateEvent(eventId);
+    await service.confirm({ eventId, studentId, sessionWindowId: morningId, scannedBy: moderatorId });
+    fakeNow = new Date(2026, 8, 5, 12, 3);
+    await service.confirm({ eventId, studentId, sessionWindowId: morningId, scannedBy: moderatorId });
+    fakeNow = new Date(2026, 8, 5, 13, 30);
+    await service.confirm({ eventId, studentId, sessionWindowId: afternoonId, scannedBy: moderatorId });
+
+    const summary = await q.getEventAttendanceSummary(pool, eventId);
+    expect(summary).toMatchObject({ registered: 2, checked_in: 1, not_yet_checked_in: 1 });
+    expect(summary.sessions.find((s) => s.session_id === morningId)).toMatchObject({
+      checked_in: 1, checked_out: 1, pending: 1, absent: 0,
+    });
+    expect(summary.sessions.find((s) => s.session_id === afternoonId)).toMatchObject({
+      checked_in: 1, checked_out: 0, pending: 1, absent: 0,
+    });
+
+    const pending = await q.listEventParticipants(pool, eventId, { sessionId: morningId, status: 'PENDING' });
+    expect(pending.total).toBe(1);
+    expect(pending.rows[0]?.student_id).toBe(second.id);
+
+    await q.closeSessionAndAssessFines(pool, afternoonId, adminId);
+    const closed = await q.getEventAttendanceSummary(pool, eventId);
+    expect(closed.sessions.find((s) => s.session_id === afternoonId)).toMatchObject({ pending: 0, absent: 1 });
+    const absent = await q.listEventParticipants(pool, eventId, { sessionId: afternoonId, status: 'ABSENT' });
+    expect(absent.total).toBe(1);
+    expect(absent.rows[0]?.student_id).toBe(second.id);
+
+    const otherEvent = await q.insertEvent(pool, {
+      name: 'Other Event', eventStartDate: new Date(2026, 8, 6), eventEndDate: new Date(2026, 8, 6),
+      isActive: true, createdBy: adminId,
+    });
+    await q.insertWindow(pool, {
+      eventId: otherEvent.id, sessionLabel: 'Morning', startTime: '07:00', endTime: '12:00', sortOrder: 0,
+    });
+    await q.publishEvent(pool, otherEvent.id, adminId);
+    const otherSummary = await q.getEventAttendanceSummary(pool, otherEvent.id);
+    expect(otherSummary.checked_in).toBe(0);
+
+    const emptyEvent = await q.insertEvent(pool, {
+      name: 'Empty Event', eventStartDate: new Date(2026, 8, 7), eventEndDate: new Date(2026, 8, 7),
+      isActive: false, createdBy: adminId,
+    });
+    const emptySummary = await q.getEventAttendanceSummary(pool, emptyEvent.id);
+    expect(emptySummary).toMatchObject({ registered: 0, checked_in: 0, not_yet_checked_in: 0, sessions: [] });
+  });
+
+  it('records an admin manual check-in without a QR and rejects a second IN', async () => {
+    if (!dbReady) return;
+    fakeNow = new Date(2026, 8, 5, 13, 30);
+    await expectRejected(service.confirm({
+      eventId, studentId, sessionWindowId: morningId, scannedBy: moderatorId,
+      expectedDirection: DIRECTION.in,
+    }), { statusCode: 409 });
+    const first = await service.confirm({
+      eventId, studentId, sessionWindowId: morningId, scannedBy: adminId,
+      expectedDirection: DIRECTION.in, allowLateManualCheckIn: true,
+      deviceNote: 'Manual check-in: QR was unavailable',
+    });
+    expect(first.direction).toBe(DIRECTION.in);
+    expect(first.scanned_by).toBe(adminId);
+    expect(first.device_note).toBe('Manual check-in: QR was unavailable');
+    expect((await q.getEventAttendanceSummary(pool, eventId)).checked_in).toBe(1);
+    const roster = await q.listEventParticipants(pool, eventId);
+    expect(roster.rows[0]?.sessions?.find((item) => item.session_id === morningId)?.status).toBe('LATE');
+    await expectRejected(service.confirm({
+      eventId, studentId, sessionWindowId: morningId, scannedBy: adminId,
+      expectedDirection: DIRECTION.in, allowLateManualCheckIn: true,
+      deviceNote: 'Manual check-in: duplicate',
+    }), { statusCode: 409 });
+    expect((await q.getEventAttendanceSummary(pool, eventId)).checked_in).toBe(1);
+    const second = await q.insertStudent(pool, {
+      studentIdCode: 'STU-2026-0002', fullName: 'Maria Santos', section: 'BSIT-3A', photoUrl: null,
+    });
+    await q.addParticipantsToEvent(pool, eventId, [second.id], adminId);
+    await q.closeSessionAndAssessFines(pool, morningId, adminId);
+    await expectRejected(service.confirm({
+      eventId, studentId: second.id, sessionWindowId: morningId, scannedBy: adminId,
+      expectedDirection: DIRECTION.in, allowLateManualCheckIn: true,
+    }), { statusCode: 409 });
+  });
+
   it('links one registration and QR pass to a participant in every session', async () => {
     if (!dbReady) return;
+    await q.updateEvent(pool, eventId, { eventEndDate: new Date(2026, 8, 6) });
     const dayTwo = await q.insertWindow(pool, {
       eventId,
       sessionDate: new Date(2026, 8, 6),
@@ -492,7 +651,8 @@ describe('AttendanceService', () => {
       if (!dbReady) return;
       const otherEvent = await q.insertEvent(pool, {
         name: 'Other',
-        eventDate: new Date(2026, 8, 6),
+        eventStartDate: new Date(2026, 8, 6),
+        eventEndDate: new Date(2026, 8, 6),
         isActive: true,
         createdBy: adminId,
       });

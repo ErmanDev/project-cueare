@@ -8,6 +8,8 @@ import { ModeratorProvider } from './lib/moderator'
 import { ToastProvider } from './lib/toast'
 import type { Role } from './lib/types'
 import { AdminAttendance } from './pages/admin/Attendance'
+import { EventAttendanceDetail } from './pages/admin/EventAttendanceDetail'
+import { EventFines } from './pages/admin/EventFines'
 import { AdminDashboard } from './pages/admin/Dashboard'
 import { AdminEvents } from './pages/admin/Events'
 import { AdminFineTemplates } from './pages/admin/FineTemplates'
@@ -63,9 +65,11 @@ export default function App() {
           <Route path="/superadmin" element={<AdminLayout />}>
             <Route index element={<AdminDashboard />} />
             <Route path="events" element={<AdminEvents />} />
-            <Route path="events/:eventId/attendance" element={<AdminAttendance />} />
+            <Route path="events/:eventId/attendance" element={<EventAttendanceDetail />} />
+            <Route path="events/:eventId/fines" element={<EventFines />} />
             <Route path="fines" element={<AdminFineTemplates />} />
-            <Route path="sections" element={<AdminSections />} />
+            <Route path="academics" element={<AdminSections />} />
+            <Route path="sections" element={<Navigate to="/superadmin/academics" replace />} />
             <Route path="students" element={<AdminStudents />} />
             <Route path="moderators" element={<AdminModerators />} />
             <Route path="attendance" element={<AdminAttendance />} />

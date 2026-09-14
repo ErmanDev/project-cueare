@@ -19,7 +19,7 @@ const TERM = {
   endsOn: '2026-12-18',
 };
 
-const PROGRAMS = ['BSIT', 'BSBA', 'BSED', 'BSBE'];
+const PROGRAMS = ['BSBA', 'BSIT'];
 const YEAR_LEVELS = [1, 2, 3, 4];
 
 // Filipino sample first names and last names for seeding
@@ -107,6 +107,11 @@ async function main(): Promise<void> {
   const pool = createPool(config.database);
   try {
     const stats = await withTransaction(pool, async (client) => {
+      // Clean up extra terms, years, and programs
+      await client.query(`DELETE FROM ${q('AcademicTerms')} WHERE ${q('termCode')} NOT IN ('2026-1S', 'DEFAULT')`);
+      await client.query(`DELETE FROM ${q('AcademicYears')} WHERE ${q('yearCode')} NOT IN ('2026-2027', 'DEFAULT')`);
+      await client.query(`DELETE FROM ${q('AcademicPrograms')} WHERE ${q('programCode')} NOT IN ('BSBA', 'BSIT')`);
+
       const termId = await ensureTerm(client);
 
       let studentCounter = 1;
