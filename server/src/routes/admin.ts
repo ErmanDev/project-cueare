@@ -276,7 +276,11 @@ adminRouter.get(
   '/events',
   asyncHandler(async (req, res) => {
     const svc = service(req);
-    await svc.deactivateExpiredEvents();
+    try {
+      await svc.deactivateExpiredEvents();
+    } catch (err) {
+      console.error('Auto-close expired events failed; continuing with event list', err);
+    }
     const events = await q.listEvents(getPool());
     const windows = await q.listAllWindows(getPool());
     const policies = await q.listEventFineSummaries(
@@ -711,7 +715,11 @@ adminRouter.get(
   asyncHandler(async (req, res) => {
     const id = parsePathId(req.params.id);
     const svc = service(req);
-    await svc.deactivateExpiredEvents();
+    try {
+      await svc.deactivateExpiredEvents();
+    } catch (err) {
+      console.error('Auto-close expired events failed; continuing with event', err);
+    }
     const existing = await q.getEventById(getPool(), id);
     if (!existing) throw notFound('Event not found');
     const windows = await svc.windowsForEvent(id);

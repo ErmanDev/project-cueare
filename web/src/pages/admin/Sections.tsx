@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { BookOpen, Calendar, GraduationCap, Layers, Plus, Search, Users, X } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 
@@ -419,6 +419,7 @@ function SectionRosterModal({
 
 export function AdminSections() {
   const [searchParams, setSearchParams] = useSearchParams()
+  const searchId = useId()
   const [query, setQuery] = useState('')
   const [hierarchy, setHierarchy] = useState<AcademicYear[] | null>(null)
   const [sections, setSections] = useState<Section[] | null>(null)

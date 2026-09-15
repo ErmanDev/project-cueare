@@ -23,9 +23,13 @@ class ModeratorDashboardScreen extends ConsumerWidget {
     final user = ref.watch(currentUserProvider);
     final events = ref.watch(activeEventsProvider);
     final selected = ref.watch(selectedEventProvider);
-    final scheme = Theme.of(context).colorScheme;
+
+    final eventList = events.asData?.value;
+    final noEvents = eventList != null && eventList.isEmpty;
+    final hello = _HelloCard(name: user?.name, username: user?.username);
 
     return Scaffold(
+      drawer: _ModeratorDrawer(name: user?.name, username: user?.username),
       appBar: AppBar(
         title: const Text('Moderator'),
         actions: [
@@ -34,161 +38,260 @@ class ModeratorDashboardScreen extends ConsumerWidget {
             icon: const Icon(Icons.refresh),
             onPressed: () => ref.invalidate(activeEventsProvider),
           ),
-          IconButton(
-            tooltip: 'Sign out',
-            icon: const Icon(Icons.logout),
-            onPressed: () async {
-              final ok = await confirmDialog(
-                context,
-                title: 'Sign out?',
-                message: 'You will need to log in again.',
-                confirmLabel: 'Sign out',
-                destructive: false,
-              );
-              if (ok) await ref.read(authProvider.notifier).signOut();
-            },
-          ),
         ],
       ),
       body: AppContentWidth(
         child: RefreshIndicator(
         onRefresh: () => ref.refresh(activeEventsProvider.future),
-        child: ListView(
-          padding: AppTheme.pagePadding,
-          children: [
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 24,
-                      backgroundColor: scheme.primaryContainer,
-                      foregroundColor: scheme.onPrimaryContainer,
-                      child: Text(
-                        (user?.name.isNotEmpty ?? false)
-                            ? user!.name[0].toUpperCase()
-                            : 'M',
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
+        child: noEvents
+            ? CustomScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                slivers: [
+                  SliverPadding(
+                    padding: AppTheme.pagePadding,
+                    sliver: SliverToBoxAdapter(child: hello),
+                  ),
+                  const SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: EmptyState(
+                      icon: Icons.event_busy,
+                      title: 'No active events.',
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                  ),
+                ],
+              )
+            : ListView(
+                padding: AppTheme.pagePadding,
+                children: [
+                  hello,
+                  const SizedBox(height: 16),
+                  const SectionHeader(
+                    title: 'Event',
+                    subtitle: 'Choose the event you are scanning for',
+                  ),
+                  AsyncValueWidget(
+                    value: events,
+                    onRetry: () => ref.invalidate(activeEventsProvider),
+                    data: (list) {
+                      return Column(
                         children: [
-                          Text(
-                            'Hi, ${user?.name ?? 'Moderator'}',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          Text(
-                            user?.username != null
-                                ? '@${user!.username}'
-                                : 'ACSSCO Bukidnon',
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(color: scheme.onSurfaceVariant),
-                          ),
+                          if (list.length > 1)
+                            DropdownButtonFormField<int>(
+                              initialValue: selected?.id,
+                              isExpanded: true,
+                              decoration: const InputDecoration(
+                                labelText: 'Select event',
+                              ),
+                              items: [
+                                for (final e in list)
+                                  DropdownMenuItem(
+                                    value: e.id,
+                                    child: Text(
+                                      '${e.name} · ${Fmt.dateShort(e.eventDate)}'
+                                      '${e.isToday ? ' (today)' : ''}',
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                              ],
+                              onChanged: (id) {
+                                final e = list
+                                    .where((x) => x.id == id)
+                                    .firstOrNull;
+                                if (e != null) {
+                                  ref
+                                      .read(selectedEventProvider.notifier)
+                                      .select(e);
+                                }
+                              },
+                            ),
+                          if (selected != null) ...[
+                            if (list.length > 1) const SizedBox(height: 10),
+                            _EventCard(event: selected),
+                          ],
                         ],
-                      ),
+                      );
+                    },
+                  ),
+                  if (selected != null) ...[
+                    const SizedBox(height: 20),
+                    const SectionHeader(
+                      title: 'Session for next scans',
+                      subtitle:
+                          'Auto uses the open window, or pick one manually',
                     ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            const SectionHeader(
-              title: 'Event',
-              subtitle: 'Choose the event you are scanning for',
-            ),
-            AsyncValueWidget(
-              value: events,
-              onRetry: () => ref.invalidate(activeEventsProvider),
-              data: (list) {
-                if (list.isEmpty) {
-                  return Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Text(
-                        'No active events. Ask the superadmin to create one '
-                        'and mark it active.',
-                        style: TextStyle(color: scheme.error),
+                    SessionOverrideWidget(event: selected),
+                    const SizedBox(height: 24),
+                    FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size.fromHeight(64),
                       ),
-                    ),
-                  );
-                }
-                return Column(
-                  children: [
-                    if (list.length > 1)
-                      DropdownButtonFormField<int>(
-                        initialValue: selected?.id,
-                        isExpanded: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Select event',
-                        ),
-                        items: [
-                          for (final e in list)
-                            DropdownMenuItem(
-                              value: e.id,
-                              child: Text(
-                                '${e.name} · ${Fmt.dateShort(e.eventDate)}'
-                                '${e.isToday ? ' (today)' : ''}',
-                                overflow: TextOverflow.ellipsis,
+                      onPressed: selected.sessionWindows.isEmpty
+                          ? null
+                          : () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => ScannerScreen(event: selected),
                               ),
                             ),
-                        ],
-                        onChanged: (id) {
-                          final e = list.where((x) => x.id == id).firstOrNull;
-                          if (e != null) {
-                            ref.read(selectedEventProvider.notifier).select(e);
-                          }
-                        },
+                      icon: const Icon(Icons.qr_code_scanner, size: 32),
+                      label: const Text(
+                        'Start scanning',
+                        style: TextStyle(fontSize: 20),
                       ),
-                    if (selected != null) ...[
-                      if (list.length > 1) const SizedBox(height: 10),
-                      _EventCard(event: selected),
-                    ],
-                  ],
-                );
-              },
-            ),
-            if (selected != null) ...[
-              const SizedBox(height: 20),
-              const SectionHeader(
-                title: 'Session for next scans',
-                subtitle: 'Auto uses the open window, or pick one manually',
-              ),
-              SessionOverrideWidget(event: selected),
-              const SizedBox(height: 24),
-              FilledButton.icon(
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size.fromHeight(64),
-                ),
-                onPressed: selected.sessionWindows.isEmpty
-                    ? null
-                    : () => Navigator.of(context).push(
+                    ),
+                    const SizedBox(height: 10),
+                    OutlinedButton.icon(
+                      onPressed: () => Navigator.of(context).push(
                         MaterialPageRoute<void>(
-                          builder: (_) => ScannerScreen(event: selected),
+                          builder: (_) => const MyScansHistoryScreen(),
                         ),
                       ),
-                icon: const Icon(Icons.qr_code_scanner, size: 32),
-                label: const Text(
-                  'Start scanning',
-                  style: TextStyle(fontSize: 20),
-                ),
+                      icon: const Icon(Icons.history),
+                      label: const Text('My scans today'),
+                    ),
+                  ],
+                ],
               ),
-              const SizedBox(height: 10),
-              OutlinedButton.icon(
-                onPressed: () => Navigator.of(context).push(
+        ),
+      ),
+    );
+  }
+}
+
+class _ModeratorDrawer extends ConsumerWidget {
+  const _ModeratorDrawer({this.name, this.username});
+
+  final String? name;
+  final String? username;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
+    return Drawer(
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 26,
+                    backgroundColor: scheme.primaryContainer,
+                    foregroundColor: scheme.onPrimaryContainer,
+                    child: Text(
+                      (name?.isNotEmpty ?? false)
+                          ? name![0].toUpperCase()
+                          : 'M',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          name ?? 'Moderator',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        Text(
+                          username != null
+                              ? '@$username · Moderator'
+                              : 'Moderator',
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: scheme.onSurfaceVariant),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.qr_code_scanner),
+              title: const Text('Scan'),
+              onTap: () => Navigator.of(context).pop(),
+            ),
+            ListTile(
+              leading: const Icon(Icons.history),
+              title: const Text('My scans today'),
+              onTap: () {
+                Navigator.of(context).pop();
+                Navigator.of(context).push(
                   MaterialPageRoute<void>(
                     builder: (_) => const MyScansHistoryScreen(),
                   ),
-                ),
-                icon: const Icon(Icons.history),
-                label: const Text('My scans today'),
-              ),
-            ],
+                );
+              },
+            ),
+            const Spacer(),
+            const Divider(height: 1),
+            ListTile(
+              leading: Icon(Icons.logout, color: scheme.error),
+              title: Text('Sign out', style: TextStyle(color: scheme.error)),
+              onTap: () async {
+                Navigator.of(context).pop();
+                if (!context.mounted) return;
+                final ok = await confirmDialog(
+                  context,
+                  title: 'Sign out?',
+                  message: 'You will need to log in again.',
+                  confirmLabel: 'Sign out',
+                  destructive: false,
+                );
+                if (ok) await ref.read(authProvider.notifier).signOut();
+              },
+            ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _HelloCard extends StatelessWidget {
+  const _HelloCard({this.name, this.username});
+
+  final String? name;
+  final String? username;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 24,
+              backgroundColor: scheme.primaryContainer,
+              foregroundColor: scheme.onPrimaryContainer,
+              child: Text(
+                (name?.isNotEmpty ?? false) ? name![0].toUpperCase() : 'M',
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Hi, ${name ?? 'Moderator'}',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  Text(
+                    username != null ? '@$username' : 'ACSSCO Bukidnon',
+                    style: Theme.of(context).textTheme.bodySmall
+                        ?.copyWith(color: scheme.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );

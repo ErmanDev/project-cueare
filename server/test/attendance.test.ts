@@ -3,7 +3,7 @@ import type { Pool } from 'pg';
 
 import { AttendanceService, computeDirection, pickWindowForTime, previewToApi } from '../src/attendance/service.ts';
 import { getConfig } from '../src/config.ts';
-import { createPool, ensureSchema } from '../src/db/pool.ts';
+import { createPool, ensureSchema, withTransaction } from '../src/db/pool.ts';
 import { backfillEventRegistrations } from '../src/db/schema.ts';
 import * as q from '../src/db/queries.ts';
 import { DIRECTION } from '../src/types.ts';
@@ -124,6 +124,24 @@ describe('AttendanceService', () => {
       console.warn('Postgres not available — attendance integration tests skipped');
     }
     expect(true).toBe(true);
+  });
+
+  it('returns the publish rule instead of 25P02 when a transaction cannot publish', async () => {
+    if (!dbReady) return;
+    const event = await q.insertEvent(pool, {
+      name: 'No Sessions',
+      eventStartDate: new Date(2026, 8, 8),
+      eventEndDate: new Date(2026, 8, 8),
+      isActive: false,
+      createdBy: adminId,
+    });
+    try {
+      await withTransaction(pool, (client) => q.publishEvent(client, event.id, adminId));
+    } catch (err) {
+      const code = err && typeof err === 'object' && 'code' in err ? String((err as { code: unknown }).code) : '';
+      expect(code).not.toBe('25P02');
+      expect(String(err)).not.toMatch(/transaction is aborted/i);
+    }
   });
 
   it('assesses capped event fines once and reports payment balances', async () => {
@@ -840,6 +858,19 @@ describe('AttendanceService', () => {
       expect(n).toBe(1);
       const event = await q.getEventById(pool, eventId);
       expect(event?.is_active).toBe(false);
+    });
+
+    it('deactivateExpiredEvents does not fail when a close is blocked', async () => {
+      if (!dbReady) return;
+      fakeNow = new Date(2026, 8, 6, 10, 0);
+      await pool.query(
+        `UPDATE "EventSessions" SET "endsAtUtc" = clock_timestamp() + interval '1 day'
+         WHERE "eventId" = $1`,
+        [eventId],
+      );
+      await expect(service.deactivateExpiredEvents()).resolves.toBe(0);
+      const event = await q.getEventById(pool, eventId);
+      expect(event?.is_active).toBe(true);
     });
   });
 

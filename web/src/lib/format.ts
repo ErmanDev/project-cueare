@@ -1,5 +1,6 @@
-export function ymd(d: Date | string): string {
-  const date = typeof d === 'string' ? new Date(d) : d
+export function ymd(d: Date | string | null | undefined): string {
+  const date = asDate(d)
+  if (!date) return ''
   const y = date.getFullYear()
   const m = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
@@ -36,31 +37,40 @@ const weekdayFmt = new Intl.DateTimeFormat(undefined, {
   year: 'numeric',
 })
 
-function asDate(d: Date | string): Date {
-  return typeof d === 'string' ? new Date(d) : d
+function asDate(d: Date | string | null | undefined): Date | null {
+  if (d instanceof Date) return Number.isNaN(d.getTime()) ? null : d
+  if (typeof d !== 'string' || !d.trim()) return null
+  const date = new Date(d)
+  return Number.isNaN(date.getTime()) ? null : date
 }
 
-export function fmtDate(d: Date | string): string {
-  return dateFmt.format(asDate(d))
+function formatDate(fmt: Intl.DateTimeFormat, d: Date | string | null | undefined): string {
+  const date = asDate(d)
+  return date ? fmt.format(date) : '—'
 }
 
-export function fmtDateShort(d: Date | string): string {
-  return dateShortFmt.format(asDate(d))
+export function fmtDate(d: Date | string | null | undefined): string {
+  return formatDate(dateFmt, d)
 }
 
-export function fmtTime(d: Date | string): string {
-  return timeFmt.format(asDate(d))
+export function fmtDateShort(d: Date | string | null | undefined): string {
+  return formatDate(dateShortFmt, d)
 }
 
-export function fmtDateTime(d: Date | string): string {
-  return dateTimeFmt.format(asDate(d))
+export function fmtTime(d: Date | string | null | undefined): string {
+  return formatDate(timeFmt, d)
 }
 
-export function fmtWeekday(d: Date | string): string {
-  return weekdayFmt.format(asDate(d))
+export function fmtDateTime(d: Date | string | null | undefined): string {
+  return formatDate(dateTimeFmt, d)
+}
+
+export function fmtWeekday(d: Date | string | null | undefined): string {
+  return formatDate(weekdayFmt, d)
 }
 
 export function fmtHhmm(hhmm: string): string {
+  if (!hhmm) return '—'
   const [h, m] = hhmm.split(':')
   if (h == null || m == null) return hhmm
   const hour = Number(h)
@@ -73,11 +83,13 @@ export function fmtRange(start: string, end: string): string {
   return `${fmtHhmm(start)} – ${fmtHhmm(end)}`
 }
 
-export function isToday(d: Date | string): boolean {
-  return ymd(d) === todayYmd()
+export function isToday(d: Date | string | null | undefined): boolean {
+  const value = ymd(d)
+  return value !== '' && value === todayYmd()
 }
 
-export function minutes(hhmm: string): number {
+export function minutes(hhmm: string | null | undefined): number {
+  if (!hhmm) return Number.NaN
   const [h, m] = hhmm.split(':')
   return Number(h) * 60 + Number(m)
 }

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ClipboardCheck, Coins, Filter, LockKeyhole, Pencil, Plus, Search, Trash2, UserCheck, Users, X } from 'lucide-react'
+import { Archive, Banknote, ClipboardList, Filter, Plus, QrCode, Search, Send, SquarePen, Trash2, Users, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 import { EventRosterModal } from '../../components/EventRosterModal'
-import { Button, EmptyState, Field, FormActions, Modal, TableSkeleton, onSubmit } from '../../components/ui'
+import { Button, ConfirmDialog, EmptyState, Field, FormActions, Modal, TableSkeleton, onSubmit } from '../../components/ui'
 import { api } from '../../lib/api'
 import { fmtRange, fmtWeekday, hhmmFromMinutes, isToday, minutes, phpAmount, ymd } from '../../lib/format'
 import { useToast } from '../../lib/toast'
@@ -26,6 +26,43 @@ const PRESET_MORNING: WindowDraft[] = [
 const PRESET_AFTERNOON: WindowDraft[] = [
   { label: 'Afternoon', start: '13:00', end: '17:00', late_after: '13:30', in_end: '14:30', out_start: '16:30', out_end: '17:30' },
 ]
+
+type SessionPresetId = 'full' | 'morning' | 'afternoon'
+
+const SESSION_PRESETS: { id: SessionPresetId; label: string; windows: WindowDraft[] }[] = [
+  { id: 'full', label: 'Full Day (Morning + Afternoon)', windows: PRESET_FULL_DAY },
+  { id: 'morning', label: 'Morning Only', windows: PRESET_MORNING },
+  { id: 'afternoon', label: 'Afternoon Only', windows: PRESET_AFTERNOON },
+]
+
+function sameTime(a?: string, b?: string) {
+  return (a ?? '').slice(0, 5) === (b ?? '').slice(0, 5)
+}
+
+function windowsMatchPreset(windows: WindowDraft[], preset: WindowDraft[]) {
+  if (windows.length !== preset.length) return false
+  return preset.every((p, i) => {
+    const w = windows[i]
+    if (!w) return false
+    return (
+      w.label === p.label &&
+      w.start === p.start &&
+      w.end === p.end &&
+      sameTime(w.late_after, p.late_after) &&
+      sameTime(w.in_end, p.in_end) &&
+      sameTime(w.out_start, p.out_start) &&
+      sameTime(w.out_end, p.out_end)
+    )
+  })
+}
+
+function matchedSessionPreset(windows: WindowDraft[]): SessionPresetId | null {
+  return SESSION_PRESETS.find((preset) => windowsMatchPreset(windows, preset.windows))?.id ?? null
+}
+
+function applySessionStart(window: WindowDraft, start: string): WindowDraft {
+  return { ...window, start, late_after: start, in_end: start }
+}
 
 function validateWindows(windows: WindowDraft[], eventDate: string): string | null {
   for (const w of windows) {
@@ -51,7 +88,9 @@ function validateWindows(windows: WindowDraft[], eventDate: string): string | nu
 }
 
 function hasSessionToday(event: Event): boolean {
-  return event.session_windows.some((w) => isToday(w.session_date || event.event_start_date))
+  const windows = event.session_windows ?? []
+  if (windows.length === 0) return isToday(event.event_start_date)
+  return windows.some((w) => isToday(w.session_date || event.event_start_date))
 }
 
 function sessionLabel(code: string): string {
@@ -74,11 +113,18 @@ export function AdminEvents() {
   const [managingRoster, setManagingRoster] = useState<Event | null>(null)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'INACTIVE' | 'TODAY'>('ALL')
+  const [pendingDelete, setPendingDelete] = useState<Event | null>(null)
 
   async function load() {
     try {
       const list = await api.get<Event[]>('/admin/events')
-      setEvents(list)
+      if (!Array.isArray(list)) throw new Error('Failed to load events')
+      setEvents(
+        list.map((event) => ({
+          ...event,
+          session_windows: event.session_windows ?? [],
+        })),
+      )
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load events')
@@ -131,14 +177,14 @@ export function AdminEvents() {
     }
   }
 
-  async function remove(e: Event) {
-    if (
-      !window.confirm(
-        `Delete "${e.name}"? All session windows and attendance for this event will be deleted.`,
-      )
-    ) {
-      return
-    }
+  function remove(e: Event) {
+    setPendingDelete(e)
+  }
+
+  async function confirmDelete() {
+    const e = pendingDelete
+    if (!e) return
+    setPendingDelete(null)
     try {
       await api.delete(`/admin/events/${e.id}`)
       toast('Event deleted')
@@ -163,7 +209,7 @@ export function AdminEvents() {
   }, [events, search, statusFilter])
 
   return (
-    <>
+    <div className="events-page">
       <div className="page-head">
         <div>
           <h2>Events Configuration</h2>
@@ -338,46 +384,50 @@ export function AdminEvents() {
                           {e.event_status === 'PUBLISHED' ? 'Active' : e.event_status === 'DRAFT' ? 'Draft' : e.event_status === 'CLOSED' ? 'Closed' : 'Cancelled'}
                         </span>
                       </td>
-                      <td>
-                        <div className="menu end">
+                      <td className="event-actions">
+                        <div className="event-actions-bar" role="group" aria-label={`Actions for ${e.name}`}>
                           <button
                             className="icon-btn"
-                            title="Manage Participants Roster"
+                            title="Manage roster"
                             onClick={() => setManagingRoster(e)}
-                            style={{ color: '#0284c7' }}
                           >
                             <Users size={16} />
                           </button>
                           <button
                             className="icon-btn"
-                            title="Generate registrations, session roster, and QR passes"
+                            title="Generate registrations and QR passes"
                             onClick={() => void syncRoster(e)}
-                            style={{ color: '#059669' }}
                           >
-                            <UserCheck size={16} />
+                            <QrCode size={16} />
                           </button>
                           <Link
                             to={`/superadmin/events/${e.id}/attendance`}
                             className="icon-btn"
-                            title="View Event Attendance Dashboard"
-                            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#2563eb' }}
+                            title="Attendance"
                           >
-                            <ClipboardCheck size={16} />
+                            <ClipboardList size={16} />
                           </Link>
-                          <Link to={`/superadmin/events/${e.id}/fines`} className="icon-btn" title="View event fines"
-                            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#b45309' }}>
-                            <Coins size={16} />
+                          <Link
+                            to={`/superadmin/events/${e.id}/fines`}
+                            className="icon-btn"
+                            title="Event fines"
+                          >
+                            <Banknote size={16} />
                           </Link>
-                          {e.event_status === 'PUBLISHED' ? <button className="icon-btn" title="Close event and assess remaining fines" onClick={() => void closeEvent(e)}>
-                            <LockKeyhole size={16} />
-                          </button> : null}
-                          {e.event_status === 'DRAFT' ? <button className="icon-btn" title="Publish event" onClick={() => void publishEvent(e)}>
-                            <UserCheck size={16} />
-                          </button> : null}
-                          <button className="icon-btn" title="Edit Event" onClick={() => setEditing(e)}>
-                            <Pencil size={16} />
+                          {e.event_status === 'PUBLISHED' ? (
+                            <button className="icon-btn" title="Close event" onClick={() => void closeEvent(e)}>
+                              <Archive size={16} />
+                            </button>
+                          ) : null}
+                          {e.event_status === 'DRAFT' ? (
+                            <button className="icon-btn" title="Publish event" onClick={() => void publishEvent(e)}>
+                              <Send size={16} />
+                            </button>
+                          ) : null}
+                          <button className="icon-btn" title="Edit event" onClick={() => setEditing(e)}>
+                            <SquarePen size={16} />
                           </button>
-                          <button className="icon-btn" title="Delete Event" onClick={() => void remove(e)}>
+                          <button className="icon-btn event-actions-danger" title="Delete event" onClick={() => void remove(e)}>
                             <Trash2 size={16} />
                           </button>
                         </div>
@@ -402,6 +452,16 @@ export function AdminEvents() {
           onUpdated={() => void load()}
         />
       ) : null}
+      {pendingDelete ? (
+        <ConfirmDialog
+          title="Delete event?"
+          message={`Delete "${pendingDelete.name}"? All session windows and attendance for this event will be deleted.`}
+          confirmLabel="Delete"
+          danger
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={() => void confirmDelete()}
+        />
+      ) : null}
       {editing ? (
         <EventForm
           existing={editing === 'new' ? null : editing}
@@ -412,7 +472,7 @@ export function AdminEvents() {
           }}
         />
       ) : null}
-    </>
+    </div>
   )
 }
 
@@ -449,6 +509,7 @@ export function EventForm({
       : defaultWindows,
   )
   const [busy, setBusy] = useState(false)
+  const [pendingSave, setPendingSave] = useState(false)
   const [templates, setTemplates] = useState<FineTemplate[] | null>(null)
   const [templateId, setTemplateId] = useState(
     existing?.fine_policy?.template_id != null ? String(existing.fine_policy.template_id) : '',
@@ -507,6 +568,41 @@ export function EventForm({
     }
   }, [existing])
 
+  function audienceRulesForSave():
+    | { audience_scope_code: string; academic_program_id?: number; year_level?: number; section_id?: number; is_required: boolean }[]
+    | null {
+    if (audienceScope === 'ALL_STUDENTS') {
+      return [{ audience_scope_code: 'ALL_STUDENTS', is_required: true }]
+    }
+    if (audienceScope === 'PROGRAM') {
+      if (!selectedProgramCode) {
+        toast('Select a program / course', 'error')
+        return null
+      }
+      const prog = programsList.find((p) => p.program_code === selectedProgramCode)
+      return prog
+        ? [{ audience_scope_code: 'PROGRAM', academic_program_id: prog.academic_program_id, is_required: true }]
+        : []
+    }
+    if (audienceScope === 'YEAR_LEVEL') {
+      return [{ audience_scope_code: 'YEAR_LEVEL', year_level: Number(selectedYearLevel), is_required: true }]
+    }
+    if (!selectedSectionId) {
+      toast('Select a section', 'error')
+      return null
+    }
+    const sec = sectionsList.find((s) => String(s.section_id) === selectedSectionId)
+    if (!sec) return []
+    const prog = programsList.find((p) => p.program_code === sec.program_code)
+    return [{
+      audience_scope_code: 'SECTION',
+      academic_program_id: prog?.academic_program_id,
+      year_level: sec.year_level,
+      section_id: sec.section_id,
+      is_required: true,
+    }]
+  }
+
   async function save() {
     if (!termId) {
       toast('Select an academic term', 'error')
@@ -517,38 +613,14 @@ export function EventForm({
       toast(err, 'error')
       return
     }
-    let audienceRules: { audience_scope_code: string; academic_program_id?: number; year_level?: number; section_id?: number; is_required: boolean }[] = []
-    if (audienceScope === 'ALL_STUDENTS') {
-      audienceRules = [{ audience_scope_code: 'ALL_STUDENTS', is_required: true }]
-    } else if (audienceScope === 'PROGRAM') {
-      if (!selectedProgramCode) {
-        toast('Select a program / course', 'error')
-        return
-      }
-      const prog = programsList.find((p) => p.program_code === selectedProgramCode)
-      if (prog) {
-        audienceRules = [{ audience_scope_code: 'PROGRAM', academic_program_id: prog.academic_program_id, is_required: true }]
-      }
-    } else if (audienceScope === 'YEAR_LEVEL') {
-      audienceRules = [{ audience_scope_code: 'YEAR_LEVEL', year_level: Number(selectedYearLevel), is_required: true }]
-    } else if (audienceScope === 'SECTION') {
-      if (!selectedSectionId) {
-        toast('Select a section', 'error')
-        return
-      }
-      const sec = sectionsList.find((s) => String(s.section_id) === selectedSectionId)
-      if (sec) {
-        const prog = programsList.find((p) => p.program_code === sec.program_code)
-        audienceRules = [{
-          audience_scope_code: 'SECTION',
-          academic_program_id: prog?.academic_program_id,
-          year_level: sec.year_level,
-          section_id: sec.section_id,
-          is_required: true,
-        }]
-      }
-    }
+    if (!audienceRulesForSave()) return
+    setPendingSave(true)
+  }
 
+  async function persist() {
+    const audienceRules = audienceRulesForSave()
+    if (!audienceRules) return
+    setPendingSave(false)
     setBusy(true)
     try {
       const payload = {
@@ -585,7 +657,7 @@ export function EventForm({
     }
   }
 
-  async function applyPreset(preset: WindowDraft[]) {
+  function applyPreset(preset: WindowDraft[]) {
     setWindows(preset)
   }
 
@@ -606,7 +678,7 @@ export function EventForm({
       start: nextStart,
       end: nextEnd,
       late_after: nextStart,
-      in_end: nextEnd,
+      in_end: nextStart,
     }
     setWindows((ws) => [...ws, draft])
   }
@@ -625,8 +697,17 @@ export function EventForm({
     setWindows((ws) => ws.filter((_, i) => i !== index))
   }
 
+  const sessionPreset = matchedSessionPreset(windows)
+
   return (
-    <Modal title={isEdit ? 'Edit event' : 'New event'} onClose={onClose} wide>
+    <>
+    <Modal
+      title={isEdit ? 'Edit event' : 'New event'}
+      onClose={() => {
+        if (!pendingSave) onClose()
+      }}
+      wide
+    >
       <form className="form-grid" onSubmit={onSubmit(save)}>
         <Field label="Event name">
           <input value={name} onChange={(e) => setName(e.target.value)} required placeholder="e.g. Acquaintance Party 2026" />
@@ -648,8 +729,6 @@ export function EventForm({
           <Field label="End Date">
             <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} required min={startDate} />
           </Field>
-        </div>
-        <div className="grid-2">
           <Field label="Status">
             <select value={active ? '1' : '0'} onChange={(e) => setActive(e.target.value === '1')}>
               <option value="1">Active</option>
@@ -733,36 +812,23 @@ export function EventForm({
           )}
         </div>
 
-        {/* Session Window Presets */}
-        <div style={{ padding: '0.75rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-          <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: '0.4rem' }}>
-            Quick Session Presets:
-          </div>
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem' }}
-              onClick={() => void applyPreset(PRESET_FULL_DAY)}
-            >
-              Full Day (Morning + Afternoon)
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem' }}
-              onClick={() => void applyPreset(PRESET_MORNING)}
-            >
-              Morning Only
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem' }}
-              onClick={() => void applyPreset(PRESET_AFTERNOON)}
-            >
-              Afternoon Only
-            </button>
+        <div className="session-presets" role="group" aria-label="Quick session presets">
+          <div className="session-presets__label">Quick Session Presets</div>
+          <div className="session-presets__row">
+            {SESSION_PRESETS.map((preset) => {
+              const pressed = sessionPreset === preset.id
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  className={`btn ${pressed ? 'btn-primary' : 'btn-secondary'}`}
+                  aria-pressed={pressed}
+                  onClick={() => applyPreset(preset.windows)}
+                >
+                  {preset.label}
+                </button>
+              )
+            })}
           </div>
         </div>
 
@@ -823,7 +889,9 @@ export function EventForm({
                   type="time"
                   value={w.start}
                   onChange={(e) =>
-                    setWindows((ws) => ws.map((x, j) => (j === i ? { ...x, start: e.target.value } : x)))
+                    setWindows((ws) =>
+                      ws.map((x, j) => (j === i ? applySessionStart(x, e.target.value) : x)),
+                    )
                   }
                 />
               </Field>
@@ -904,5 +972,19 @@ export function EventForm({
         <FormActions onCancel={onClose} submitLabel={isEdit ? 'Save' : 'Create'} busy={busy} />
       </form>
     </Modal>
+    {pendingSave ? (
+      <ConfirmDialog
+        title={isEdit ? 'Save event?' : 'Create event?'}
+        message={
+          isEdit
+            ? `Save changes to "${name.trim() || existing?.name || 'this event'}"?`
+            : `Create "${name.trim() || 'this event'}"?`
+        }
+        confirmLabel={isEdit ? 'Save' : 'Create'}
+        onCancel={() => setPendingSave(false)}
+        onConfirm={() => void persist()}
+      />
+    ) : null}
+    </>
   )
 }

@@ -321,12 +321,18 @@ export class AttendanceService {
     let count = 0;
     for (const event of active) {
       if (!isPastDate(event.event_end_date, this.now())) continue;
-      if (db === this.pool) {
-        await withTransaction(this.pool, (client) => q.deactivateEvent(client, event.id));
-      } else {
-        await q.deactivateEvent(db, event.id);
+      try {
+        if (db === this.pool) {
+          await withTransaction(this.pool, (client) => q.deactivateEvent(client, event.id));
+        } else {
+          await q.deactivateEvent(db, event.id);
+        }
+        count++;
+      } catch (err) {
+        // Listing / scanning must still work when one event cannot close yet
+        // (open session, fine assessment error, etc.).
+        console.error(`Could not auto-close expired event ${event.id}:`, err);
       }
-      count++;
     }
     if (count > 0) this.catalog.invalidateEvent();
     return count;

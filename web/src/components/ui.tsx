@@ -70,11 +70,13 @@ export function Modal({
   children,
   onClose,
   wide,
+  stacked,
 }: {
   title: string
   children: ReactNode
   onClose: () => void
   wide?: boolean
+  stacked?: boolean
 }) {
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null
@@ -90,7 +92,7 @@ export function Modal({
 
   return (
     <div
-      className="modal-backdrop"
+      className={`modal-backdrop${stacked ? ' is-stacked' : ''}`}
       role="presentation"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose()
@@ -106,6 +108,40 @@ export function Modal({
         {children}
       </div>
     </div>
+  )
+}
+
+export function ConfirmDialog({
+  title,
+  message,
+  confirmLabel = 'Confirm',
+  danger,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  title: string
+  message: string
+  confirmLabel?: string
+  danger?: boolean
+  busy?: boolean
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  return (
+    <Modal title={title} onClose={onCancel} stacked>
+      <p className="muted" style={{ margin: '0 0 18px' }}>
+        {message}
+      </p>
+      <div className="actions">
+        <Button variant="ghost" onClick={onCancel} disabled={busy}>
+          Cancel
+        </Button>
+        <Button variant={danger ? 'danger' : 'primary'} onClick={onConfirm} disabled={busy}>
+          {busy ? 'Working…' : confirmLabel}
+        </Button>
+      </div>
+    </Modal>
   )
 }
 

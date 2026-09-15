@@ -3,6 +3,8 @@ import 'dart:io' show Platform;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'app_config.dart';
+
 /// Where IIS publishes the attendance site, e.g. `attendance.yourschool.edu`.
 class ServerSettings {
   const ServerSettings({
@@ -63,7 +65,7 @@ class ServerSettings {
 }
 
 /// Loads + persists [ServerSettings] with shared_preferences.
-/// `null` state = not configured yet (first launch).
+/// Unset prefs fall back to [AppConfig.defaultServerSettings], then [ServerSettings.localDev].
 class ServerSettingsNotifier extends AsyncNotifier<ServerSettings?> {
   static const _hostKey = 'server_host';
   static const _portKey = 'server_port';
@@ -81,7 +83,7 @@ class ServerSettingsNotifier extends AsyncNotifier<ServerSettings?> {
         https: prefs.getBool(_httpsKey) ?? false,
       );
     }
-    return ServerSettings.localDev();
+    return AppConfig.defaultServerSettings ?? ServerSettings.localDev();
   }
 
   Future<void> save(ServerSettings settings) async {

@@ -1,5 +1,5 @@
 import type { AttendanceDetailRow } from '../utils/serialize.ts';
-import { badRequest, conflict, isPgBusinessRule, isPgUniqueViolation, pgErrorMessage } from '../utils/errors.ts';
+import { badRequest, conflict, isPgUniqueViolation } from '../utils/errors.ts';
 import { parseMinutes, startOfDay } from '../utils/time.ts';
 import { PROGRAM_NAMES, type MappedImportStudent } from '../students/roster.ts';
 import { escapeLike } from '../utils/studentCode.ts';
@@ -160,10 +160,10 @@ function slugCode(value: string, max: number): string {
   return slug || 'X';
 }
 
-function eventDateFromRow(value: Date | string): Date {
-  if (value instanceof Date) return startOfDay(value);
-  const d = new Date(value);
-  return startOfDay(d);
+function eventDateFromRow(value: Date | string | null | undefined): Date {
+  const date = coerceDate(value);
+  if (!date) return startOfDay(new Date(0));
+  return startOfDay(date);
 }
 
 function toWindow(row: {
@@ -180,23 +180,33 @@ function toWindow(row: {
   is_closed?: boolean;
   sort_order: number;
 }): SessionWindowRow {
-  const date = row.starts_at_utc;
-  const sessionDate = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  const start = coerceDate(row.starts_at_utc);
+  const end = coerceDate(row.ends_at_utc);
+  const date = start ?? end;
+  const sessionDate = date
+    ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+    : '';
   return {
     id: row.event_session_id,
     event_id: row.event_id,
     session_label: row.session_name,
     session_date: sessionDate,
-    start_time: hhmm(row.starts_at_utc),
-    end_time: hhmm(row.ends_at_utc),
-    late_after: row.late_after_utc ? hhmm(row.late_after_utc) : null,
-    in_end: row.check_in_closes_at_utc ? hhmm(row.check_in_closes_at_utc) : null,
-    out_start: row.check_out_opens_at_utc ? hhmm(row.check_out_opens_at_utc) : null,
-    out_end: row.check_out_closes_at_utc ? hhmm(row.check_out_closes_at_utc) : null,
+    start_time: start ? hhmm(start) : '00:00',
+    end_time: end ? hhmm(end) : '00:00',
+    late_after: coerceDate(row.late_after_utc) ? hhmm(coerceDate(row.late_after_utc)!) : null,
+    in_end: coerceDate(row.check_in_closes_at_utc) ? hhmm(coerceDate(row.check_in_closes_at_utc)!) : null,
+    out_start: coerceDate(row.check_out_opens_at_utc) ? hhmm(coerceDate(row.check_out_opens_at_utc)!) : null,
+    out_end: coerceDate(row.check_out_closes_at_utc) ? hhmm(coerceDate(row.check_out_closes_at_utc)!) : null,
     requires_checkout: row.requires_check_out ?? false,
     is_closed: row.is_closed ?? false,
     sort_order: row.sort_order,
   };
+}
+
+function coerceDate(value: Date | string | null | undefined): Date | null {
+  if (value == null || value === '') return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function mapEvent(row: {
@@ -1901,31 +1911,20 @@ export async function publishEvent(
   }
   await ensureEventRoster(db, eventId, actorUserId);
   await upsertEventParticipantTokens(db, eventId, actorUserId);
-  try {
-    await db.query(
-      `UPDATE ${q('Events')}
-       SET ${q('eventStatusCode')} = 'PUBLISHED', ${q('updatedAtUtc')} = clock_timestamp()
-       WHERE ${q('eventId')} = $1 AND ${q('eventStatusCode')} = 'DRAFT'`,
-      [eventId],
-    );
-  } catch (err) {
-    if (isPgBusinessRule(err) && /publish requires/i.test(pgErrorMessage(err))) {
-      return (await getEventById(db, eventId))!;
-    }
-    throw err;
-  }
-  try {
-    await db.query(
-      `UPDATE ${q('EventFinePolicies')}
-       SET ${q('policyStatusCode')} = 'ACTIVE',
-           ${q('activatedAtUtc')} = COALESCE(${q('activatedAtUtc')}, clock_timestamp())
-       WHERE ${q('eventId')} = $1 AND ${q('policyStatusCode')} = 'DRAFT'`,
-      [eventId],
-    );
-  } catch (err) {
-    const code = err && typeof err === 'object' && 'code' in err ? String((err as { code: unknown }).code) : '';
-    if (code !== '42P01') throw err;
-  }
+  await db.query(
+    `UPDATE ${q('Events')}
+     SET ${q('eventStatusCode')} = 'PUBLISHED', ${q('updatedAtUtc')} = clock_timestamp()
+     WHERE ${q('eventId')} = $1 AND ${q('eventStatusCode')} = 'DRAFT'`,
+    [eventId],
+  );
+  await ignoreMissingRelation(
+    db,
+    `UPDATE ${q('EventFinePolicies')}
+     SET ${q('policyStatusCode')} = 'ACTIVE',
+         ${q('activatedAtUtc')} = COALESCE(${q('activatedAtUtc')}, clock_timestamp())
+     WHERE ${q('eventId')} = $1 AND ${q('policyStatusCode')} = 'DRAFT'`,
+    [eventId],
+  );
   return (await getEventById(db, eventId))!;
 }
 

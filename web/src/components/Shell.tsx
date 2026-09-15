@@ -17,6 +17,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 
 import { useAuth } from '../lib/auth'
 import { initial } from '../lib/format'
+import { ConfirmDialog } from './ui'
 import { Logo } from './Logo'
 
 const adminNav = [
@@ -43,6 +44,7 @@ export function Shell() {
   const closeBtnRef = useRef<HTMLButtonElement>(null)
   const sidebarRef = useRef<HTMLElement>(null)
   const [navOpen, setNavOpen] = useState(false)
+  const [signOutOpen, setSignOutOpen] = useState(false)
   const nav = user?.role === 'superadmin' ? adminNav : moderatorNav
 
   useEffect(() => {
@@ -88,10 +90,13 @@ export function Shell() {
   }, [navOpen])
 
   function signOut() {
-    if (window.confirm('Sign out? You will need to log in again.')) {
-      logout()
-      navigate('/login', { replace: true })
-    }
+    setSignOutOpen(true)
+  }
+
+  function confirmSignOut() {
+    setSignOutOpen(false)
+    logout()
+    navigate('/login', { replace: true })
   }
 
   return (
@@ -186,6 +191,15 @@ export function Shell() {
           <Outlet />
         </div>
       </main>
+      {signOutOpen ? (
+        <ConfirmDialog
+          title="Sign out?"
+          message="You will need to log in again."
+          confirmLabel="Sign out"
+          onCancel={() => setSignOutOpen(false)}
+          onConfirm={confirmSignOut}
+        />
+      ) : null}
     </div>
   )
 }
