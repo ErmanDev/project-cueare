@@ -18,8 +18,13 @@ import 'session_override_widget.dart';
 /// Camera + scan loop:
 ///   detect QR → POST /scan/preview → bottom sheet → Confirm/Cancel → resume.
 class ScannerScreen extends ConsumerStatefulWidget {
-  const ScannerScreen({super.key, required this.event});
+  const ScannerScreen({
+    super.key,
+    required this.event,
+    this.embedded = false,
+  });
   final EventModel event;
+  final bool embedded;
 
   @override
   ConsumerState<ScannerScreen> createState() => _ScannerScreenState();
@@ -296,165 +301,184 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
     // we were opened with.
     final event = ref.watch(selectedEventProvider) ?? widget.event;
     final scheme = Theme.of(context).colorScheme;
-
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(event.name, overflow: TextOverflow.ellipsis),
-        actions: [
-          if (_cameraSupported) ...[
-            IconButton(
-              tooltip: 'Torch',
-              icon: const Icon(Icons.flashlight_on_outlined),
-              onPressed: () => _controller.toggleTorch(),
-            ),
-            IconButton(
-              tooltip: 'Switch camera',
-              icon: const Icon(Icons.cameraswitch_outlined),
-              onPressed: () => _controller.switchCamera(),
-            ),
-          ],
-          IconButton(
-            tooltip: 'Type code manually',
-            icon: const Icon(Icons.keyboard_alt_outlined),
-            onPressed: _busy ? null : _manualEntry,
-          ),
-        ],
+    final tools = <Widget>[
+      if (_cameraSupported) ...[
+        IconButton(
+          tooltip: 'Torch',
+          icon: const Icon(Icons.flashlight_on_outlined),
+          onPressed: () => _controller.toggleTorch(),
+        ),
+        IconButton(
+          tooltip: 'Switch camera',
+          icon: const Icon(Icons.cameraswitch_outlined),
+          onPressed: () => _controller.switchCamera(),
+        ),
+      ],
+      IconButton(
+        tooltip: 'Type code manually',
+        icon: const Icon(Icons.keyboard_alt_outlined),
+        onPressed: _busy ? null : _manualEntry,
       ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-            child: SessionOverrideWidget(event: event, dense: true),
+    ];
+
+    final body = Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SessionOverrideWidget(event: event, dense: true),
+              if (widget.embedded)
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: tools,
+                  ),
+                ),
+            ],
           ),
-          Expanded(
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                if (_cameraSupported)
-                  MobileScanner(
-                    controller: _controller,
-                    errorBuilder: (context, error) =>
-                        _CameraError(error: error),
-                  )
-                else
-                  _NoCameraFallback(onManual: _manualEntry),
-                // Viewfinder
-                if (_cameraSupported)
-                  IgnorePointer(
-                    child: Center(
-                      child: Container(
-                        width: 260,
-                        height: 260,
-                        decoration: BoxDecoration(
-                          border: Border.all(
-                            color: _busy
-                                ? Colors.amber.shade300
-                                : Colors.white.withValues(alpha: 0.85),
-                            width: 3,
+        ),
+        Expanded(
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (_cameraSupported)
+                MobileScanner(
+                  controller: _controller,
+                  errorBuilder: (context, error) =>
+                      _CameraError(error: error),
+                )
+              else
+                _NoCameraFallback(onManual: _manualEntry),
+              // Viewfinder
+              if (_cameraSupported)
+                IgnorePointer(
+                  child: Center(
+                    child: Container(
+                      width: 260,
+                      height: 260,
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                          color: _busy
+                              ? Colors.amber.shade300
+                              : Colors.white.withValues(alpha: 0.85),
+                          width: 3,
+                        ),
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.25),
+                            blurRadius: 12,
                           ),
-                          borderRadius: BorderRadius.circular(20),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.25),
-                              blurRadius: 12,
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              if (_busy)
+                Positioned(
+                  top: 16,
+                  left: 0,
+                  right: 0,
+                  child: Center(
+                    child: Material(
+                      elevation: 2,
+                      borderRadius: BorderRadius.circular(20),
+                      color: scheme.surface.withValues(alpha: 0.92),
+                      child: const Padding(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 8,
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                              ),
                             ),
+                            SizedBox(width: 10),
+                            Text('Checking…'),
                           ],
                         ),
                       ),
                     ),
                   ),
-                if (_busy)
-                  Positioned(
-                    top: 16,
-                    left: 0,
-                    right: 0,
-                    child: Center(
-                      child: Material(
-                        elevation: 2,
-                        borderRadius: BorderRadius.circular(20),
-                        color: scheme.surface.withValues(alpha: 0.92),
-                        child: const Padding(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 8,
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              ),
-                              SizedBox(width: 10),
-                              Text('Checking…'),
-                            ],
-                          ),
+                ),
+              if (_toast != null)
+                Positioned(
+                  left: 16,
+                  right: 16,
+                  bottom: 16,
+                  child: Material(
+                    color: _toast!.color,
+                    borderRadius: BorderRadius.circular(14),
+                    elevation: 6,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
+                      child: Text(
+                        _toast!.text,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 16,
                         ),
                       ),
                     ),
                   ),
-                if (_toast != null)
-                  Positioned(
-                    left: 16,
-                    right: 16,
-                    bottom: 16,
-                    child: Material(
-                      color: _toast!.color,
-                      borderRadius: BorderRadius.circular(14),
-                      elevation: 6,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 14,
-                        ),
-                        child: Text(
-                          _toast!.text,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 16,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
+                ),
+            ],
           ),
-          Material(
-            color: scheme.surfaceContainerHighest,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.qr_code_scanner,
-                    size: 18,
-                    color: scheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
+        ),
+        Material(
+          color: scheme.surfaceContainerHighest,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.qr_code_scanner,
+                  size: 18,
+                  color: scheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
                     'Point the camera at a student QR code',
                     style: TextStyle(color: scheme.onSurfaceVariant),
                   ),
-                  const Spacer(),
-                  Text(
-                    '$_confirmedThisSession confirmed',
-                    style: TextStyle(
-                      color: scheme.onSurfaceVariant,
-                      fontWeight: FontWeight.w600,
-                    ),
+                ),
+                Text(
+                  '$_confirmedThisSession confirmed',
+                  style: TextStyle(
+                    color: scheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
-        ],
+        ),
+      ],
+    );
+
+    if (widget.embedded) return body;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(event.name, overflow: TextOverflow.ellipsis),
+        actions: tools,
       ),
+      body: body,
     );
   }
 }

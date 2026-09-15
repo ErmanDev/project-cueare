@@ -15,33 +15,107 @@ import 'my_scans_history_screen.dart';
 import 'scanner_screen.dart';
 import 'session_override_widget.dart';
 
-class ModeratorDashboardScreen extends ConsumerWidget {
+class ModeratorDashboardScreen extends ConsumerStatefulWidget {
   const ModeratorDashboardScreen({super.key});
+
+  @override
+  ConsumerState<ModeratorDashboardScreen> createState() =>
+      _ModeratorDashboardScreenState();
+}
+
+class _ModeratorDashboardScreenState
+    extends ConsumerState<ModeratorDashboardScreen> {
+  int _index = 0;
+
+  Future<void> _signOut() async {
+    final ok = await confirmDialog(
+      context,
+      title: 'Sign out?',
+      message: 'You will need to log in again.',
+      confirmLabel: 'Sign out',
+      destructive: false,
+    );
+    if (ok && mounted) await ref.read(authProvider.notifier).signOut();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final selected = ref.watch(selectedEventProvider);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(switch (_index) {
+          0 => 'Moderator',
+          1 => selected?.name ?? 'Scan',
+          _ => 'My scans today',
+        }),
+        actions: [
+          if (_index == 0)
+            IconButton(
+              tooltip: 'Refresh events',
+              icon: const Icon(Icons.refresh),
+              onPressed: () => ref.invalidate(activeEventsProvider),
+            ),
+          if (_index == 2)
+            IconButton(
+              tooltip: 'Refresh scans',
+              icon: const Icon(Icons.refresh),
+              onPressed: () => ref.invalidate(myScansProvider),
+            ),
+          IconButton(
+            tooltip: 'Sign out',
+            icon: const Icon(Icons.logout),
+            onPressed: _signOut,
+          ),
+        ],
+      ),
+      body: switch (_index) {
+        0 => const _ModeratorEventTab(),
+        1 => _ModeratorScanTab(
+          event: selected,
+          onChooseEvent: () => setState(() => _index = 0),
+        ),
+        _ => const MyScansHistoryScreen(embedded: true),
+      },
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _index,
+        onDestinationSelected: (i) => setState(() => _index = i),
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.event_outlined),
+            selectedIcon: Icon(Icons.event),
+            label: 'Event',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.qr_code_scanner),
+            selectedIcon: Icon(Icons.qr_code_scanner),
+            label: 'Scan',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.history_outlined),
+            selectedIcon: Icon(Icons.history),
+            label: 'My scans',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ModeratorEventTab extends ConsumerWidget {
+  const _ModeratorEventTab();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final user = ref.watch(currentUserProvider);
     final events = ref.watch(activeEventsProvider);
     final selected = ref.watch(selectedEventProvider);
-
     final eventList = events.asData?.value;
     final noEvents = eventList != null && eventList.isEmpty;
     final hello = _HelloCard(name: user?.name, username: user?.username);
 
-    return Scaffold(
-      drawer: _ModeratorDrawer(name: user?.name, username: user?.username),
-      appBar: AppBar(
-        title: const Text('Moderator'),
-        actions: [
-          IconButton(
-            tooltip: 'Refresh events',
-            icon: const Icon(Icons.refresh),
-            onPressed: () => ref.invalidate(activeEventsProvider),
-          ),
-        ],
-      ),
-      body: AppContentWidth(
-        child: RefreshIndicator(
+    return AppContentWidth(
+      child: RefreshIndicator(
         onRefresh: () => ref.refresh(activeEventsProvider.future),
         child: noEvents
             ? CustomScrollView(
@@ -120,133 +194,39 @@ class ModeratorDashboardScreen extends ConsumerWidget {
                           'Auto uses the open window, or pick one manually',
                     ),
                     SessionOverrideWidget(event: selected),
-                    const SizedBox(height: 24),
-                    FilledButton.icon(
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size.fromHeight(64),
-                      ),
-                      onPressed: selected.sessionWindows.isEmpty
-                          ? null
-                          : () => Navigator.of(context).push(
-                              MaterialPageRoute<void>(
-                                builder: (_) => ScannerScreen(event: selected),
-                              ),
-                            ),
-                      icon: const Icon(Icons.qr_code_scanner, size: 32),
-                      label: const Text(
-                        'Start scanning',
-                        style: TextStyle(fontSize: 20),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    OutlinedButton.icon(
-                      onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => const MyScansHistoryScreen(),
-                        ),
-                      ),
-                      icon: const Icon(Icons.history),
-                      label: const Text('My scans today'),
-                    ),
                   ],
                 ],
               ),
-        ),
       ),
     );
   }
 }
 
-class _ModeratorDrawer extends ConsumerWidget {
-  const _ModeratorDrawer({this.name, this.username});
+class _ModeratorScanTab extends StatelessWidget {
+  const _ModeratorScanTab({required this.event, required this.onChooseEvent});
 
-  final String? name;
-  final String? username;
+  final EventModel? event;
+  final VoidCallback onChooseEvent;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final scheme = Theme.of(context).colorScheme;
-    return Drawer(
-      child: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-              child: Row(
-                children: [
-                  CircleAvatar(
-                    radius: 26,
-                    backgroundColor: scheme.primaryContainer,
-                    foregroundColor: scheme.onPrimaryContainer,
-                    child: Text(
-                      (name?.isNotEmpty ?? false)
-                          ? name![0].toUpperCase()
-                          : 'M',
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          name ?? 'Moderator',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        Text(
-                          username != null
-                              ? '@$username · Moderator'
-                              : 'Moderator',
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(color: scheme.onSurfaceVariant),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.qr_code_scanner),
-              title: const Text('Scan'),
-              onTap: () => Navigator.of(context).pop(),
-            ),
-            ListTile(
-              leading: const Icon(Icons.history),
-              title: const Text('My scans today'),
-              onTap: () {
-                Navigator.of(context).pop();
-                Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => const MyScansHistoryScreen(),
-                  ),
-                );
-              },
-            ),
-            const Spacer(),
-            const Divider(height: 1),
-            ListTile(
-              leading: Icon(Icons.logout, color: scheme.error),
-              title: Text('Sign out', style: TextStyle(color: scheme.error)),
-              onTap: () async {
-                Navigator.of(context).pop();
-                if (!context.mounted) return;
-                final ok = await confirmDialog(
-                  context,
-                  title: 'Sign out?',
-                  message: 'You will need to log in again.',
-                  confirmLabel: 'Sign out',
-                  destructive: false,
-                );
-                if (ok) await ref.read(authProvider.notifier).signOut();
-              },
-            ),
-          ],
+  Widget build(BuildContext context) {
+    if (event == null || event!.sessionWindows.isEmpty) {
+      return EmptyState(
+        icon: Icons.qr_code_scanner,
+        title: event == null
+            ? 'Choose an event first'
+            : 'This event has no sessions',
+        subtitle: 'Pick an event with a session window, then scan.',
+        action: FilledButton(
+          onPressed: onChooseEvent,
+          child: const Text('Choose event'),
         ),
-      ),
+      );
+    }
+    return ScannerScreen(
+      key: ValueKey(event!.id),
+      event: event!,
+      embedded: true,
     );
   }
 }

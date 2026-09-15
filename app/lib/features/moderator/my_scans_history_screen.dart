@@ -9,25 +9,17 @@ import 'moderator_providers.dart';
 
 /// Read-only list of the moderator's own confirmed scans today.
 class MyScansHistoryScreen extends ConsumerWidget {
-  const MyScansHistoryScreen({super.key});
+  const MyScansHistoryScreen({super.key, this.embedded = false});
+
+  final bool embedded;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scans = ref.watch(myScansProvider);
     final event = ref.watch(selectedEventProvider);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('My scans today'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () => ref.invalidate(myScansProvider),
-          ),
-        ],
-      ),
-      body: AppContentWidth(
-        child: RefreshIndicator(
+    final body = AppContentWidth(
+      child: RefreshIndicator(
         onRefresh: () => ref.refresh(myScansProvider.future),
         child: AsyncValueWidget(
           value: scans,
@@ -91,8 +83,22 @@ class MyScansHistoryScreen extends ConsumerWidget {
             );
           },
         ),
-        ),
       ),
+    );
+
+    if (embedded) return body;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('My scans today'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: () => ref.invalidate(myScansProvider),
+          ),
+        ],
+      ),
+      body: body,
     );
   }
 }
