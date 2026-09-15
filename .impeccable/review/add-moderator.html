@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Add moderator</title>
+    <link rel="stylesheet" href="../../web/src/index.css?v=7" />
+    <style>
+      html,
+      body {
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <div>
+            <h1>SSC QR Attendance</h1>
+            <small>ACSSCO Bukidnon Campus</small>
+          </div>
+        </div>
+        <nav>
+          <a href="#" class="nav-link">Home</a>
+          <a href="#" class="nav-link active">Moderators</a>
+        </nav>
+      </aside>
+      <main class="content">
+        <div class="page">
+          <div class="moderators-page">
+            <div class="page-head">
+              <div>
+                <h2>Moderators</h2>
+                <p>Users who can scan attendance and manage sessions.</p>
+              </div>
+              <button class="btn btn-primary" type="button">Add moderator</button>
+            </div>
+          </div>
+        </div>
+        <div class="modal-backdrop" role="presentation">
+          <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+            <h3 id="modal-title">Add moderator</h3>
+            <div class="add-moderator">
+              <p class="muted add-moderator-lead">
+                Search a student, then promote them to moderator. They sign in with their student ID as
+                username and password until you change it.
+              </p>
+              <div class="search">
+                <label class="visually-hidden" for="add-mod-search">Search students</label>
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <path d="m21 21-4.3-4.3"></path>
+                </svg>
+                <input id="add-mod-search" value="" placeholder="Search name or student ID" />
+              </div>
+              <div class="pick-list">
+                <button type="button" class="card row pick-btn">
+                  <div class="avatar">MS</div>
+                  <div class="grow">
+                    <strong>Maria Santos</strong>
+                    <p class="muted">02-26-1042</p>
+                  </div>
+                </button>
+                <button type="button" class="card row pick-btn is-picked">
+                  <div class="avatar">JD</div>
+                  <div class="grow">
+                    <strong>Juan Dela Cruz</strong>
+                    <p class="muted">02-26-1001</p>
+                  </div>
+                </button>
+                <button type="button" class="card row pick-btn" disabled>
+                  <div class="avatar">AM</div>
+                  <div class="grow">
+                    <strong>AM Scanner</strong>
+                    <p class="muted">02-26-0888 · already a moderator</p>
+                  </div>
+                </button>
+              </div>
+              <div class="actions">
+                <button class="btn btn-ghost" type="button">Cancel</button>
+                <button class="btn btn-primary" type="button">Promote moderator</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

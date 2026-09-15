@@ -14,7 +14,9 @@ abstract class AppConfig {
   );
 
   /// LAN Express API when no `--dart-define` is given (no IIS).
-  static const String _defaultApiBaseUrl = 'http://192.168.1.59:8080';
+  // static const String _defaultApiBaseUrl = 'http://192.168.1.59:8080';
+  // static const String _defaultApiBaseUrl = 'http://192.168.0.114:8080';
+  static const String _defaultApiBaseUrl = 'http://10.74.210.171:8080';
 
   static String get apiBaseUrl =>
       _definedApiBaseUrl.isNotEmpty ? _definedApiBaseUrl : _defaultApiBaseUrl;

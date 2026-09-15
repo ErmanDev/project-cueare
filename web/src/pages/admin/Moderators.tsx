@@ -1,30 +1,24 @@
-import { useEffect, useState } from 'react'
-import { Pencil, Plus, Search, Trash2 } from 'lucide-react'
+import { useEffect, useId, useMemo, useState } from 'react'
+import { Pencil, Plus, Search, UserMinus, X } from 'lucide-react'
 
-import { Button, CardListSkeleton, EmptyState, Field, FormActions, Modal, onSubmit } from '../../components/ui'
+import { Button, ConfirmDialog, EmptyState, Field, FormActions, Modal, TableSkeleton, onSubmit } from '../../components/ui'
 import { api } from '../../lib/api'
 import { initial } from '../../lib/format'
 import { useToast } from '../../lib/toast'
 import type { Student, StudentPage, User } from '../../lib/types'
 
-type Student = {
-  id: number
-  student_id_code?: string | null
-  full_name: string
-  section?: string | null
-  user_id?: number | null
-}
-
-type StudentPage = {
-  students: Student[]
-  total: number
-}
+type AccountFilter = 'all' | 'student' | 'staff'
 
 export function AdminModerators() {
   const { toast } = useToast()
+  const searchId = useId()
   const [list, setList] = useState<User[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [form, setForm] = useState<User | 'new' | null>(null)
+  const [pendingDemote, setPendingDemote] = useState<User | null>(null)
+  const [demoting, setDemoting] = useState(false)
+  const [query, setQuery] = useState('')
+  const [accountFilter, setAccountFilter] = useState<AccountFilter>('all')
 
   async function load() {
     try {
@@ -40,32 +34,42 @@ export function AdminModerators() {
     void load()
   }, [])
 
-  async function demote(m: User) {
-    if (!window.confirm(`Demote ${m.name} to student? They will sign in as a student again.`)) {
-      return
-    }
+  async function confirmDemote() {
+    const m = pendingDemote
+    if (!m || demoting) return
+    setDemoting(true)
     try {
       await api.post(`/admin/moderators/${m.id}/demote`)
       toast('Demoted to student')
+      setPendingDemote(null)
       await load()
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Demote failed', 'error')
+    } finally {
+      setDemoting(false)
     }
   }
 
-  async function remove(m: User) {
-    if (!window.confirm(`Delete moderator "${m.name}"?`)) return
-    try {
-      await api.delete(`/admin/moderators/${m.id}`)
-      toast('Moderator deleted')
-      await load()
-    } catch (e) {
-      toast(e instanceof Error ? e.message : 'Delete failed', 'error')
-    }
+  const filtered = useMemo(() => {
+    if (!list) return []
+    const needle = query.trim().toLowerCase()
+    return list.filter((m) => {
+      if (accountFilter === 'student' && !m.student_id) return false
+      if (accountFilter === 'staff' && m.student_id) return false
+      if (!needle) return true
+      return m.name.toLowerCase().includes(needle) || m.username.toLowerCase().includes(needle)
+    })
+  }, [list, query, accountFilter])
+
+  const filtering = Boolean(query.trim()) || accountFilter !== 'all'
+
+  function clearFilters() {
+    setQuery('')
+    setAccountFilter('all')
   }
 
   return (
-    <>
+    <div className="moderators-page">
       <div className="page-head">
         <div>
           <h2>Moderators</h2>
@@ -76,32 +80,124 @@ export function AdminModerators() {
         </Button>
       </div>
 
+      <div className="filter-bar">
+        <div className="search">
+          <label className="visually-hidden" htmlFor={searchId}>
+            Search moderators
+          </label>
+          <Search size={16} aria-hidden />
+          <input
+            id={searchId}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search name or username"
+          />
+          {query ? (
+            <button type="button" className="icon-btn" onClick={() => setQuery('')} title="Clear search">
+              <X size={16} />
+            </button>
+          ) : null}
+        </div>
+        <div className="segmented" role="group" aria-label="Account type">
+          {(
+            [
+              ['all', 'All'],
+              ['student', 'Student'],
+              ['staff', 'Staff'],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              className={accountFilter === key ? 'active' : ''}
+              onClick={() => setAccountFilter(key)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {error ? <p className="error-text">{error}</p> : null}
 
       {list === null ? (
-        <CardListSkeleton label="Loading moderators" count={3} />
+        <TableSkeleton
+          label="Loading moderators"
+          tableClass="moderators-table"
+          rows={6}
+          meta={false}
+          columns={[
+            { label: 'Name', width: '70%' },
+            { label: 'Username', width: '48%' },
+            { label: 'Account', width: '36%' },
+            { label: 'Actions', variant: 'actions', count: 2 },
+          ]}
+        />
       ) : list.length === 0 ? (
         <EmptyState
           title="No moderators yet"
           subtitle="Add a moderator to let them scan attendance."
         />
+      ) : filtered.length === 0 ? (
+        <EmptyState
+          title="No matches"
+          subtitle="Try a different name, username, or account type."
+          action={
+            filtering ? (
+              <Button variant="secondary" onClick={clearFilters}>
+                Clear filters
+              </Button>
+            ) : undefined
+          }
+        />
       ) : (
-        <div className="mod-grid">
-          {list.map((m) => (
-            <article key={m.id} className="card mod-card">
-              <div className="mod-avatar">{initial(m.name)}</div>
-              <div className="mod-info">
-                <h3>{m.name}</h3>
-                <p className="muted">@{m.username}</p>
-              </div>
-              <button className="icon-btn edit-btn" title="Edit" onClick={() => setForm(m)}>
-                <Pencil size={18} />
-              </button>
-              <button className="icon-btn danger-btn" title="Delete" onClick={() => remove(m)}>
-                <Trash2 size={18} />
-              </button>
-            </article>
-          ))}
+        <div className="card table-card">
+          <div className="table-wrap">
+            <table className="data moderators-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Username</th>
+                  <th>Account</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((m) => (
+                  <tr key={m.id}>
+                    <td>
+                      <strong className="cell-name">{m.name}</strong>
+                    </td>
+                    <td>@{m.username}</td>
+                    <td className="muted">{m.student_id ? 'Student account' : 'Staff account'}</td>
+                    <td>
+                      <div className="menu end">
+                        <button className="icon-btn" title="Edit" onClick={() => setForm(m)}>
+                          <Pencil size={16} />
+                        </button>
+                        {m.student_id ? (
+                          <button
+                            className="icon-btn"
+                            type="button"
+                            title="Demote to student"
+                            onClick={() => setPendingDemote(m)}
+                          >
+                            <UserMinus size={16} />
+                            <span className="visually-hidden">Demote to student</span>
+                          </button>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {filtering ? (
+            <p className="muted table-meta">
+              Showing {filtered.length} of {list.length}
+            </p>
+          ) : null}
         </div>
       )}
       {form === 'new' ? (
@@ -122,17 +218,19 @@ export function AdminModerators() {
           }}
         />
       ) : null}
-      {form && form !== 'new' ? (
-        <ModeratorEditForm
-          existing={form}
-          onClose={() => setForm(null)}
-          onSaved={() => {
-            setForm(null)
-            void load()
+      {pendingDemote ? (
+        <ConfirmDialog
+          title="Demote to student?"
+          message={`${pendingDemote.name} will sign in as a student again.`}
+          confirmLabel="Demote to student"
+          busy={demoting}
+          onCancel={() => {
+            if (!demoting) setPendingDemote(null)
           }}
+          onConfirm={() => void confirmDemote()}
         />
       ) : null}
-    </>
+    </div>
   )
 }
 
@@ -144,6 +242,7 @@ function AddModeratorForm({
   onSaved: () => void
 }) {
   const { toast } = useToast()
+  const searchId = useId()
   const [query, setQuery] = useState('')
   const [debounced, setDebounced] = useState('')
   useEffect(() => {
@@ -194,55 +293,61 @@ function AddModeratorForm({
 
   return (
     <Modal title="Add moderator" onClose={onClose}>
-      <p className="muted">
-        Search a student, then promote them to moderator. They sign in with their student ID as
-        username and password until you change it.
-      </p>
-      <div className="search">
-        <Search size={16} />
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search name or student ID"
-          autoFocus
-        />
-      </div>
-      {students === null ? (
-        <p className="muted">Searching…</p>
-      ) : students.length === 0 ? (
-        <EmptyState title="No matching students" />
-      ) : (
-        <div className="pick-list">
-          {students.map((s) => {
-            const already = s.user_id != null
-            const picked = selected?.id === s.id
-            return (
-              <button
-                key={s.id}
-                type="button"
-                className={`card row pick-btn${picked ? ' is-picked' : ''}`}
-                disabled={already}
-                onClick={() => setSelected(s)}
-              >
-                <div className="avatar">{initial(s.full_name)}</div>
-                <div className="grow">
-                  <strong>{s.full_name}</strong>
-                  <p className="muted">
-                    {already ? `${s.student_id_code} · already a moderator` : s.student_id_code}
-                  </p>
-                </div>
-              </button>
-            )
-          })}
+      <div className="add-moderator">
+        <p className="muted add-moderator-lead">
+          Search a student, then promote them to moderator. They sign in with their student ID as
+          username and password until you change it.
+        </p>
+        <div className="search">
+          <label className="visually-hidden" htmlFor={searchId}>
+            Search students
+          </label>
+          <Search size={16} aria-hidden />
+          <input
+            id={searchId}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search name or student ID"
+            autoFocus
+          />
         </div>
-      )}
-      <div className="actions">
-        <Button variant="ghost" onClick={onClose} disabled={busy}>
-          Cancel
-        </Button>
-        <Button onClick={() => void promote()} disabled={!selected || !!selected.user_id || busy}>
-          {busy ? 'Saving…' : 'Promote moderator'}
-        </Button>
+        {students === null ? (
+          <p className="muted">Searching…</p>
+        ) : students.length === 0 ? (
+          <EmptyState title="No matching students" />
+        ) : (
+          <div className="pick-list">
+            {students.map((s) => {
+              const already = s.user_id != null
+              const picked = selected?.id === s.id
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  className={`card row pick-btn${picked ? ' is-picked' : ''}`}
+                  disabled={already}
+                  onClick={() => setSelected(s)}
+                >
+                  <div className="avatar">{initial(s.full_name)}</div>
+                  <div className="grow">
+                    <strong>{s.full_name}</strong>
+                    <p className="muted">
+                      {already ? `${s.student_id_code} · already a moderator` : s.student_id_code}
+                    </p>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        )}
+        <div className="actions">
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button onClick={() => void promote()} disabled={!selected || !!selected.user_id || busy}>
+            {busy ? 'Saving…' : 'Promote moderator'}
+          </Button>
+        </div>
       </div>
     </Modal>
   )

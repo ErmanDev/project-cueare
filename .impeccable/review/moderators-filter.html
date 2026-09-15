@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Moderators search filter</title>
+    <link rel="stylesheet" href="../../web/src/index.css" />
+    <style>
+      html,
+      body {
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <div>
+            <h1>SSC QR Attendance</h1>
+            <small>ACSSCO Bukidnon Campus</small>
+          </div>
+        </div>
+        <nav>
+          <a href="#" class="nav-link">Home</a>
+          <a href="#" class="nav-link active">Moderators</a>
+        </nav>
+      </aside>
+      <main class="content">
+        <div class="page">
+          <div class="moderators-page">
+            <div class="page-head">
+              <div>
+                <h2>Moderators</h2>
+                <p>Users who can scan attendance and manage sessions.</p>
+              </div>
+              <button class="btn btn-primary" type="button">Add moderator</button>
+            </div>
+            <div class="filter-bar">
+              <div class="search">
+                <label class="visually-hidden" for="mod-search">Search moderators</label>
+                <input id="mod-search" value="" placeholder="Search name or username" />
+              </div>
+              <div class="segmented" role="group" aria-label="Account type">
+                <button type="button" class="active">All</button>
+                <button type="button">Student</button>
+                <button type="button">Staff</button>
+              </div>
+            </div>
+            <div class="card table-card">
+              <div class="table-wrap">
+                <table class="data moderators-table">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Username</th>
+                      <th>Account</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td><strong class="cell-name">Maria Santos</strong></td>
+                      <td>@02-26-1042</td>
+                      <td class="muted">Student account</td>
+                      <td></td>
+                    </tr>
+                    <tr>
+                      <td><strong class="cell-name">AM Scanner</strong></td>
+                      <td>@scanner.am</td>
+                      <td class="muted">Staff account</td>
+                      <td></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

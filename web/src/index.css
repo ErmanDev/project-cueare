@@ -310,7 +310,8 @@ p {
   margin-inline: auto;
 }
 
-.page:has(.events-page) {
+.page:has(.events-page),
+.page:has(.moderators-page) {
   max-width: 1560px;
 }
 
@@ -616,10 +617,6 @@ button.cal-day {
   .modal-backdrop {
     padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right))
       max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
-  }
-
-  .modal {
-    width: 100%;
   }
 
   .actions {
@@ -1240,15 +1237,24 @@ table.data.is-skeleton tr:hover td {
   align-items: center;
 }
 
+@media (max-width: 700px) {
+  .filter-bar .search {
+    flex: 1 1 100%;
+  }
+}
+
 .search {
   position: relative;
   flex: 1;
-  min-width: 180px;
+  min-width: 0;
+  max-width: 100%;
   margin-bottom: 16px;
 }
 
 .search input {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   background: var(--surface-lowest);
   border: 1px solid var(--outline-variant);
   border-radius: var(--radius);
@@ -1398,14 +1404,45 @@ table.data.is-skeleton tr:hover td {
   background: var(--surface-lowest);
   border-radius: 16px;
   width: min(520px, 100%);
+  min-width: 0;
+  max-width: 100%;
   max-height: 90vh;
   overflow: auto;
   padding: 22px;
   box-shadow: 0 16px 48px var(--shadow);
 }
 
+.add-moderator {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.add-moderator > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.add-moderator-lead {
+  margin: 0 0 12px;
+  overflow-wrap: break-word;
+}
+
+.add-moderator > .search {
+  flex: 0 1 auto;
+  width: 100%;
+  margin-bottom: 16px;
+}
+
 .modal.wide {
   width: min(720px, 100%);
+}
+
+@media (max-width: 560px) {
+  .modal {
+    width: 100%;
+  }
 }
 
 .modal h3 {
@@ -1427,6 +1464,18 @@ table.data.is-skeleton tr:hover td {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 18px;
+}
+
+@media (max-width: 520px) {
+  .modal .actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .modal .actions .btn {
+    flex: 1 1 auto;
+    width: 100%;
+  }
 }
 
 .actions.tight {
@@ -1932,6 +1981,28 @@ table.fines-table td:last-child {
 
 table.students-table {
   min-width: 920px;
+}
+
+table.moderators-table {
+  width: 100%;
+  min-width: 880px;
+}
+
+table.moderators-table th:last-child,
+table.moderators-table td:last-child {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+}
+
+table.moderators-table th:nth-child(2),
+table.moderators-table td:nth-child(2) {
+  width: 22%;
+}
+
+table.moderators-table th:nth-child(3),
+table.moderators-table td:nth-child(3) {
+  width: 18%;
 }
 
 table.attendance-table {

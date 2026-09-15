@@ -12,6 +12,7 @@
     "build:web": "bun scripts/build-web.ts",
     "ensure-db": "bun scripts/ensure-database.ts",
     "seed-admin": "bun scripts/seed-admin.ts",
+    "seed-moderators": "bun scripts/seed-moderators.ts",
     "seed-sample": "bun scripts/seed-sample.ts",
     "seed-fine-templates": "bun scripts/seed-fine-templates.ts",
     "seed-acquaintance-event": "bun scripts/seed-acquaintance-event.ts",

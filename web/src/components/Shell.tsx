@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from "react";
 import {
   CalendarDays,
   ClipboardCheck,
@@ -12,95 +12,97 @@ import {
   QrCode,
   Scale,
   X,
-} from 'lucide-react'
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+} from "lucide-react";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
 
-import { useAuth } from '../lib/auth'
-import { initial } from '../lib/format'
-import { ConfirmDialog } from './ui'
-import { Logo } from './Logo'
+import { useAuth } from "../lib/auth";
+import { initial } from "../lib/format";
+import { ConfirmDialog } from "./ui";
+import { Logo } from "./Logo";
 
 const adminNav = [
-  { to: '/superadmin', label: 'Home', icon: LayoutDashboard, end: true },
-  { to: '/superadmin/events', label: 'Events', icon: CalendarDays },
-  { to: '/superadmin/fines', label: 'Fines', icon: Scale },
-  { to: '/superadmin/academics', label: 'Academics', icon: Layers },
-  { to: '/superadmin/students', label: 'Students', icon: GraduationCap },
-  { to: '/superadmin/moderators', label: 'Moderators', icon: IdCard },
-  { to: '/superadmin/attendance', label: 'Attendance', icon: ClipboardCheck },
-]
+  { to: "/superadmin", label: "Home", icon: LayoutDashboard, end: true },
+  { to: "/superadmin/events", label: "Events", icon: CalendarDays },
+  { to: "/superadmin/fines", label: "Fines", icon: Scale },
+  { to: "/superadmin/academics", label: "Academics", icon: Layers },
+  { to: "/superadmin/students", label: "Students", icon: GraduationCap },
+  { to: "/superadmin/moderators", label: "Moderators", icon: IdCard },
+  { to: "/superadmin/attendance", label: "Attendance", icon: ClipboardCheck },
+];
 
 const moderatorNav = [
-  { to: '/scanner', label: 'Home', icon: LayoutDashboard, end: true },
-  { to: '/scanner/scan', label: 'Scan', icon: QrCode },
-  { to: '/scanner/history', label: 'My scans', icon: History },
-]
+  { to: "/scanner", label: "Home", icon: LayoutDashboard, end: true },
+  { to: "/scanner/scan", label: "Scan", icon: QrCode },
+  { to: "/scanner/history", label: "My scans", icon: History },
+];
 
 export function Shell() {
-  const { user, logout } = useAuth()
-  const navigate = useNavigate()
-  const sidebarId = useId()
-  const menuBtnRef = useRef<HTMLButtonElement>(null)
-  const closeBtnRef = useRef<HTMLButtonElement>(null)
-  const sidebarRef = useRef<HTMLElement>(null)
-  const [navOpen, setNavOpen] = useState(false)
-  const [signOutOpen, setSignOutOpen] = useState(false)
-  const nav = user?.role === 'superadmin' ? adminNav : moderatorNav
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const sidebarId = useId();
+  const menuBtnRef = useRef<HTMLButtonElement>(null);
+  const closeBtnRef = useRef<HTMLButtonElement>(null);
+  const sidebarRef = useRef<HTMLElement>(null);
+  const [navOpen, setNavOpen] = useState(false);
+  const [signOutOpen, setSignOutOpen] = useState(false);
+  const nav = user?.role === "superadmin" ? adminNav : moderatorNav;
 
   useEffect(() => {
-    const mq = window.matchMedia('(max-width: 900px)')
+    const mq = window.matchMedia("(max-width: 900px)");
     function onChange() {
-      if (!mq.matches) setNavOpen(false)
+      if (!mq.matches) setNavOpen(false);
     }
-    mq.addEventListener('change', onChange)
-    return () => mq.removeEventListener('change', onChange)
-  }, [])
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
 
   useEffect(() => {
-    if (!navOpen) return
-    const menuBtn = menuBtnRef.current
-    const sidebar = sidebarRef.current
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    closeBtnRef.current?.focus()
+    if (!navOpen) return;
+    const menuBtn = menuBtnRef.current;
+    const sidebar = sidebarRef.current;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeBtnRef.current?.focus();
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        setNavOpen(false)
-        return
+      if (e.key === "Escape") {
+        setNavOpen(false);
+        return;
       }
-      if (e.key !== 'Tab' || !sidebar) return
-      const focusable = sidebar.querySelectorAll<HTMLElement>('a[href], button:not([disabled])')
-      const first = focusable[0]
-      const last = focusable[focusable.length - 1]
-      if (!first || !last) return
+      if (e.key !== "Tab" || !sidebar) return;
+      const focusable = sidebar.querySelectorAll<HTMLElement>(
+        "a[href], button:not([disabled])",
+      );
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (!first || !last) return;
       if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault()
-        last.focus()
+        e.preventDefault();
+        last.focus();
       } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault()
-        first.focus()
+        e.preventDefault();
+        first.focus();
       }
     }
-    window.addEventListener('keydown', onKey)
+    window.addEventListener("keydown", onKey);
     return () => {
-      document.body.style.overflow = previousOverflow
-      window.removeEventListener('keydown', onKey)
-      menuBtn?.focus()
-    }
-  }, [navOpen])
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKey);
+      menuBtn?.focus();
+    };
+  }, [navOpen]);
 
   function signOut() {
-    setSignOutOpen(true)
+    setSignOutOpen(true);
   }
 
   function confirmSignOut() {
-    setSignOutOpen(false)
-    logout()
-    navigate('/login', { replace: true })
+    setSignOutOpen(false);
+    logout();
+    navigate("/login", { replace: true });
   }
 
   return (
-    <div className={`app-shell${navOpen ? ' is-nav-open' : ''}`}>
+    <div className={`app-shell${navOpen ? " is-nav-open" : ""}`}>
       <header className="shell-bar">
         <button
           ref={menuBtnRef}
@@ -115,10 +117,15 @@ export function Shell() {
         </button>
         <div className="shell-bar-brand">
           <Logo size={32} className="sidebar-logo shell-bar-logo" />
-          <strong>SSC Attendance</strong>
+          <strong>Supreme Student Council</strong>
         </div>
         {user ? (
-          <button type="button" className="icon-btn" title="Sign out" onClick={signOut}>
+          <button
+            type="button"
+            className="icon-btn"
+            title="Sign out"
+            onClick={signOut}
+          >
             <LogOut size={18} />
             <span className="visually-hidden">Sign out</span>
           </button>
@@ -135,7 +142,9 @@ export function Shell() {
         id={sidebarId}
         ref={sidebarRef}
         className="sidebar"
-        {...(navOpen ? { role: 'dialog', 'aria-modal': true, 'aria-label': 'Menu' } : {})}
+        {...(navOpen
+          ? { role: "dialog", "aria-modal": true, "aria-label": "Menu" }
+          : {})}
       >
         <div className="sidebar-drawer-head">
           <button
@@ -151,7 +160,7 @@ export function Shell() {
         <div className="sidebar-brand">
           <Logo size={40} className="sidebar-logo" />
           <div>
-            <h1>SSC Attendance</h1>
+            <h1>Supreme Student Council</h1>
             <small>ACSSCO Bukidnon</small>
           </div>
         </div>
@@ -161,7 +170,9 @@ export function Shell() {
               key={item.to}
               to={item.to}
               end={item.end}
-              className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+              className={({ isActive }) =>
+                `nav-link${isActive ? " active" : ""}`
+              }
               onClick={() => setNavOpen(false)}
             >
               <item.icon size={18} />
@@ -172,12 +183,17 @@ export function Shell() {
         <div className="sidebar-spacer" />
         {user ? (
           <div className="sidebar-user">
-            <div className="avatar" style={{ background: 'rgba(255,255,255,0.2)', color: '#fff' }}>
+            <div
+              className="avatar"
+              style={{ background: "rgba(255,255,255,0.2)", color: "#fff" }}
+            >
               {initial(user.name)}
             </div>
             <div className="grow">
               <strong>{user.name}</strong>
-              <span>{user.role === 'superadmin' ? 'Superadmin' : 'Moderator'}</span>
+              <span>
+                {user.role === "superadmin" ? "Superadmin" : "Moderator"}
+              </span>
             </div>
             <button className="icon-btn" title="Sign out" onClick={signOut}>
               <LogOut size={18} />
@@ -201,5 +217,5 @@ export function Shell() {
         />
       ) : null}
     </div>
-  )
+  );
 }
