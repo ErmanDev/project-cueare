@@ -54,37 +54,28 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    expect(find.text('Events'), findsWidgets);
     expect(find.text('Attendance'), findsOneWidget);
     expect(find.text('Fines'), findsOneWidget);
-    expect(find.text('QR'), findsOneWidget);
-    expect(find.text('Profile'), findsOneWidget);
     expect(find.byType(AppLogo), findsNothing);
-    expect(find.text('Events'), findsOneWidget);
     expect(find.text('General Assembly'), findsOneWidget);
 
     await tester.tap(find.text('Attendance'));
     await tester.pumpAndSettle();
-    expect(find.text('My attendance'), findsOneWidget);
+    expect(find.text('My attendance'), findsWidgets);
 
     await tester.tap(find.text('Fines'));
     await tester.pumpAndSettle();
     expect(find.widgetWithText(AppBar, 'Fines'), findsOneWidget);
 
-    await tester.tap(find.text('Profile'));
-    await tester.pumpAndSettle();
-    expect(find.widgetWithText(AppBar, 'Profile'), findsOneWidget);
-    expect(find.text('Juan Dela Cruz'), findsOneWidget);
-    expect(find.text('Student ID'), findsOneWidget);
-    expect(find.text('Change password'), findsOneWidget);
-
-    await tester.tap(find.text('Change password'));
+    await tester.tap(find.byIcon(Icons.lock_outline));
     await tester.pumpAndSettle();
     expect(find.text('Current password'), findsOneWidget);
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('QR'));
+    await tester.tap(find.byIcon(Icons.qr_code_2_outlined));
     await tester.pumpAndSettle();
-    expect(find.text('Events'), findsOneWidget);
+    expect(find.widgetWithText(AppBar, 'Events'), findsOneWidget);
   });
 }

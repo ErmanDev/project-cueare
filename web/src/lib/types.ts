@@ -207,6 +207,15 @@ export type ScanPreview = {
   message?: string | null
 }
 
+export type VenueQrTokenResponse = {
+  eventSessionQrTokenId: string
+  eventSessionId: string
+  actionCode: 'IN' | 'OUT'
+  validFromUtc: string
+  expiresAtUtc: string
+  qrValue: string
+}
+
 export type AttendanceQuery = {
   event_id?: number
   date?: string

@@ -40,9 +40,9 @@ void main() {
   test('AppConfig default is the LAN Express API', () {
     final s = AppConfig.defaultServerSettings;
     expect(s, isNotNull);
-    expect(s!.host, '192.168.1.7');
-    expect(s.port, 8080);
+    expect(s!.host, '10.74.210.219');
+    expect(s.port, 84);
     expect(s.https, isFalse);
-    expect(s.baseUrl, 'http://192.168.1.7:8080');
+    expect(s.baseUrl, 'http://10.74.210.219:84');
   });
 }

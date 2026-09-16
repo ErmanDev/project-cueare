@@ -10,6 +10,7 @@ import '../../models/session_window_model.dart';
 import '../../models/student_model.dart';
 import '../../models/user_model.dart';
 import '../api/api_client.dart';
+import '../utils/student_code.dart';
 
 const _prefsKey = 'ssc_local_db_v1';
 
@@ -332,13 +333,49 @@ class LocalDb {
 
   StudentModel requireStudentByCode(String code) {
     final trimmed = code.trim();
-    final student = _students
+    final lowerTrimmed = trimmed.toLowerCase();
+
+    // 1. Direct exact match
+    var student = _students
         .where(
           (s) =>
-              s.studentIdCode.toLowerCase() == trimmed.toLowerCase() ||
+              s.studentIdCode.toLowerCase() == lowerTrimmed ||
               (s.qrPayload != null && s.qrPayload == trimmed),
         )
         .firstOrNull;
+
+    // 2. Candidate extraction (Codes, Normalized Codes, Names)
+    if (student == null) {
+      final parsed = extractCandidatePayloads(trimmed);
+
+      // 2a. Try Extracted Candidate Codes & Normalized Codes
+      for (final candidate in parsed.codes) {
+        final candLower = candidate.toLowerCase();
+        final candNorm = normalizeCode(candidate);
+        student ??= _students.where((s) {
+          final sCodeLower = s.studentIdCode.toLowerCase();
+          final sCodeNorm = normalizeCode(s.studentIdCode);
+          return sCodeLower == candLower ||
+              (candNorm.isNotEmpty && sCodeNorm == candNorm) ||
+              (s.qrPayload != null && s.qrPayload == candidate);
+        }).firstOrNull;
+        if (student != null) break;
+      }
+
+      // 2b. Try Candidate Names (e.g. "Je-ann Callo")
+      if (student == null) {
+        for (final name in parsed.names) {
+          final nameLower = name.toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+          student ??= _students.where((s) {
+            final fullNameLower =
+                s.fullName.toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+            return fullNameLower == nameLower;
+          }).firstOrNull;
+          if (student != null) break;
+        }
+      }
+    }
+
     if (student == null) {
       throw const ApiFailure(message: 'Student not found', statusCode: 404);
     }

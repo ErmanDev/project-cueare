@@ -261,10 +261,14 @@ class _HelloCard extends StatelessWidget {
                 children: [
                   Text(
                     'Hi, ${name ?? 'Moderator'}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   Text(
                     username != null ? '@$username' : 'ACSSCO Bukidnon',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.bodySmall
                         ?.copyWith(color: scheme.onSurfaceVariant),
                   ),

@@ -1,9 +1,11 @@
 import type { AttendanceDetailRow } from '../utils/serialize.ts';
 import { badRequest, conflict, isPgUniqueViolation } from '../utils/errors.ts';
-import { parseMinutes, startOfDay } from '../utils/time.ts';
+import { cleanInetIp } from '../utils/http.ts';
+import { parseIsoDateTime, parseMinutes, startOfDay } from '../utils/time.ts';
 import { PROGRAM_NAMES, type MappedImportStudent } from '../students/roster.ts';
 import { escapeLike } from '../utils/studentCode.ts';
 import { calculateFines, type FineAssessment, type FineRule, type FineStatus } from '../fines/calculation.ts';
+import { withTransaction } from './pool.ts';
 import { q } from './ident.ts';
 import type {
   AttendanceFilter,
@@ -160,11 +162,6 @@ function slugCode(value: string, max: number): string {
   return slug || 'X';
 }
 
-function eventDateFromRow(value: Date | string | null | undefined): Date {
-  const date = coerceDate(value);
-  if (!date) return startOfDay(new Date(0));
-  return startOfDay(date);
-}
 
 function toWindow(row: {
   event_session_id: number;
@@ -203,8 +200,25 @@ function toWindow(row: {
   };
 }
 
+function eventDateFromRow(value: Date | string | null | undefined): Date {
+  if (value == null || value === '') return startOfDay(new Date(0));
+  if (typeof value === 'string') {
+    const parsed = parseIsoDateTime(value);
+    if (parsed) return startOfDay(parsed);
+  }
+  if (value instanceof Date) {
+    return new Date(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate());
+  }
+  const date = coerceDate(value);
+  if (!date) return startOfDay(new Date(0));
+  return startOfDay(date);
+}
+
 function coerceDate(value: Date | string | null | undefined): Date | null {
   if (value == null || value === '') return null;
+  if (typeof value === 'string') {
+    return parseIsoDateTime(value);
+  }
   const date = value instanceof Date ? value : new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
 }
@@ -283,8 +297,8 @@ const EVENT_SELECT = `
     e.${q('academicTermId')} AS academic_term_id,
     e.${q('eventName')} AS name,
     e.${q('eventStatusCode')} AS event_status,
-    e.${q('eventStartDate')}::timestamp AS event_start_date,
-    e.${q('eventEndDate')}::timestamp AS event_end_date,
+    e.${q('eventStartDate')}::text AS event_start_date,
+    e.${q('eventEndDate')}::text AS event_end_date,
     (e.${q('eventStatusCode')} = 'PUBLISHED') AS is_active,
     e.${q('createdByUserId')} AS created_by,
     e.${q('createdAtUtc')} AS created_at,
@@ -460,6 +474,21 @@ export async function getModeratorById(db: Queryable, id: number): Promise<UserR
   );
 }
 
+export async function assertSpecialModeratorIdFree(
+  db: Queryable,
+  username: string,
+  excludeUserId?: number,
+): Promise<void> {
+  const existing = await getUserByUsername(db, username);
+  if (existing && existing.id !== excludeUserId) {
+    throw conflict('Username or ID is already in use');
+  }
+  const student = await getStudentByCode(db, username);
+  if (student && student.user_id !== excludeUserId) {
+    throw conflict('Username matches an existing student ID code');
+  }
+}
+
 export async function deleteUser(db: Queryable, id: number): Promise<void> {
   await db.query(`DELETE FROM ${q('Users')} WHERE ${q('userId')} = $1`, [id]);
 }
@@ -555,7 +584,26 @@ export async function getStudentById(db: Queryable, id: number): Promise<Student
 }
 
 export async function getStudentByCode(db: Queryable, code: string): Promise<StudentRow | null> {
-  return one<StudentRow>(db, `${STUDENT_SELECT} WHERE s.${q('studentNumber')} = $1`, [code]);
+  const trimmed = code.trim();
+  if (!trimmed) return null;
+  const normalized = trimmed.toLowerCase().replaceAll(/[^a-z0-9]/g, '');
+  return one<StudentRow>(
+    db,
+    `${STUDENT_SELECT}
+     WHERE LOWER(s.${q('studentNumber')}) = LOWER($1)
+        OR (length($2) > 0 AND REPLACE(REPLACE(LOWER(s.${q('studentNumber')}), '-', ''), '_', '') = $2)
+        OR LOWER(trim(concat_ws(' ', s.${q('firstName')}, s.${q('middleName')}, s.${q('lastName')}, s.suffix))) = LOWER($1)
+        OR LOWER(trim(concat_ws(' ', s.${q('firstName')}, s.${q('lastName')}))) = LOWER($1)
+     LIMIT 1`,
+    [trimmed, normalized],
+  );
+}
+
+export async function getStudentByCodeOrName(
+  db: Queryable,
+  input: string,
+): Promise<StudentRow | null> {
+  return getStudentByCode(db, input);
 }
 
 export async function getStudentsByCodes(
@@ -845,7 +893,19 @@ export async function upsertImportedStudent(
 }
 
 export async function deleteStudent(db: Queryable, id: number): Promise<void> {
-  await db.query(`DELETE FROM ${q('Students')} WHERE ${q('studentId')} = $1`, [id]);
+  await withTransaction(db, async (tx) => {
+    await tx.query(`UPDATE ${q('Students')} SET ${q('userId')} = NULL WHERE ${q('studentId')} = $1`, [id]);
+    await tx.query(`DELETE FROM ${q('StudentUserLinks')} WHERE ${q('studentId')} = $1`, [id]);
+    await tx.query(`UPDATE ${q('AttendanceScanAttempts')} SET ${q('resolvedStudentId')} = NULL WHERE ${q('resolvedStudentId')} = $1`, [id]);
+    await tx.query(`DELETE FROM ${q('EventAudienceRules')} WHERE ${q('studentId')} = $1`, [id]);
+    await tx.query(`DELETE FROM ${q('AttendanceLogs')} WHERE ${q('studentId')} = $1`, [id]);
+    await tx.query(`DELETE FROM ${q('EventRegistrations')} WHERE ${q('studentId')} = $1`, [id]);
+    await tx.query(`DELETE FROM ${q('FineAssessments')} WHERE ${q('studentId')} = $1`, [id]);
+    await tx.query(`DELETE FROM ${q('StudentViolations')} WHERE ${q('studentId')} = $1`, [id]);
+    await tx.query(`DELETE FROM ${q('StudentFines')} WHERE ${q('studentId')} = $1`, [id]);
+    await tx.query(`DELETE FROM ${q('StudentEnrollments')} WHERE ${q('studentId')} = $1`, [id]);
+    await tx.query(`DELETE FROM ${q('Students')} WHERE ${q('studentId')} = $1`, [id]);
+  });
 }
 
 export async function listEvents(db: Queryable): Promise<EventRow[]> {
@@ -993,6 +1053,11 @@ export async function replaceEventAudienceRules(
   rules: EventAudienceRuleInput[],
 ): Promise<number> {
   const termId = await eventTermId(db, eventId);
+  await ignoreMissingRelation(
+    db,
+    `UPDATE ${q('EventRegistrations')} SET ${q('sourceAudienceRuleId')} = NULL WHERE ${q('eventId')} = $1`,
+    [eventId],
+  );
   await db.query(`DELETE FROM ${q('EventAudienceRules')} WHERE ${q('eventId')} = $1`, [eventId]);
   let inserted = 0;
   for (const raw of rules) {
@@ -1815,7 +1880,7 @@ export async function listRegisteredEventsForStudent(
          AND er.${q('studentId')} = $1
          AND er.${q('registrationStatusCode')} = 'ACTIVE'
      )
-     ORDER BY e.${q('eventDate')} DESC, e.${q('eventName')} ASC`,
+     ORDER BY e.${q('eventStartDate')} DESC, e.${q('eventName')} ASC`,
     [studentId],
   );
 }
@@ -3832,6 +3897,10 @@ export async function getEventFineReport(db: Queryable, eventId: number): Promis
       paid_amount: Number(r.paid_amount), outstanding_amount: Number(r.outstanding_amount) })), preview };
 }
 
+export async function listFinesForStudent(db: Queryable, studentId: number): Promise<any[]> {
+  return listStudentFineBalances(db, { studentId });
+}
+
 export async function listStudentFineBalances(
   db: Queryable,
   filters: {
@@ -4628,7 +4697,7 @@ export async function attendanceSelfScanEventQr(
       opts.authenticatedUserId,
       opts.clientRequestId,
       opts.clientFingerprintHash ?? null,
-      opts.ipAddress ?? null,
+      cleanInetIp(opts.ipAddress) ?? null,
     ],
   );
   if (!row) throw badRequest('Self scan execution failed');

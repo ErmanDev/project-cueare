@@ -34,6 +34,12 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+
+    packaging {
+        jniLibs {
+            // Keep debug symbols empty for standard release size optimization
+        }
+    }
 }
 
 kotlin {

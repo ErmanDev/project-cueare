@@ -68,4 +68,34 @@ void main() {
     );
     expect(second.computedDirection, 'OUT');
   });
+
+  test('v1 legacy composite QR payload scan works on device', () async {
+    db.login('moderator', 'changeme123');
+    var event = db.activeEvents().first;
+    for (final extra in event.sessionWindows.skip(1).toList()) {
+      await db.deleteSessionWindow(extra.id, force: true);
+    }
+    event = db.event(event.id);
+    await db.updateSessionWindow(
+      event.sessionWindows.first.id,
+      start: '00:00',
+      end: '23:59',
+    );
+    event = db.event(event.id);
+
+    final preview = db.preview(
+      eventId: event.id,
+      qrPayload: 'STU-2026-0001, Juan Dela Cruz',
+      sessionWindowId: event.sessionWindows.first.id,
+    );
+    expect(preview.student.fullName, 'Juan Dela Cruz');
+
+    final preview2 = db.preview(
+      eventId: event.id,
+      qrPayload: '02-26-0001, Juan   Dela   Cruz',
+      sessionWindowId: event.sessionWindows.first.id,
+    );
+    expect(preview2.student.studentIdCode, 'STU-2026-0001');
+  });
 }
+

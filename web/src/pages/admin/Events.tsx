@@ -3,6 +3,7 @@ import { Archive, Banknote, ClipboardList, Filter, Plus, QrCode, Search, Send, S
 import { Link } from 'react-router-dom'
 
 import { EventRosterModal } from '../../components/EventRosterModal'
+import { VenueQrModal } from '../../components/VenueQrModal'
 import { Button, ConfirmDialog, EmptyState, Field, FormActions, Modal, TableSkeleton, onSubmit } from '../../components/ui'
 import { api } from '../../lib/api'
 import { fmtRange, fmtWeekday, hhmmFromMinutes, isToday, minutes, phpAmount, ymd } from '../../lib/format'
@@ -114,6 +115,12 @@ export function AdminEvents() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'INACTIVE' | 'TODAY'>('ALL')
   const [pendingDelete, setPendingDelete] = useState<Event | null>(null)
+  const [venueQrSession, setVenueQrSession] = useState<{
+    eventId: number
+    eventName: string
+    sessionWindowId: number
+    sessionLabel: string
+  } | null>(null)
 
   async function load() {
     try {
@@ -186,7 +193,12 @@ export function AdminEvents() {
     if (!e) return
     setPendingDelete(null)
     try {
-      await api.delete(`/admin/events/${e.id}`)
+      try {
+        await api.delete(`/admin/events/${e.id}`)
+      } catch {
+        // Fallback to POST for IIS environments where HTTP DELETE verb is blocked
+        await api.post(`/admin/events/${e.id}/delete`)
+      }
       toast('Event deleted')
       await load()
     } catch (err) {
@@ -358,6 +370,24 @@ export function AdminEvents() {
                                   {w.session_date ? `${w.session_date} · ` : ''}{w.session_label} {fmtRange(w.start_time, w.end_time)}
                                   {w.late_after ? <small style={{ color: '#d97706', marginLeft: '0.25rem' }}>[Late &gt; {w.late_after}]</small> : null}
                                 </span>
+                                {!w.is_closed && (
+                                  <button
+                                    type="button"
+                                    className="chip chip-active"
+                                    style={{ cursor: 'pointer' }}
+                                    title={`Display venue QR code for ${w.session_label}`}
+                                    onClick={() =>
+                                      setVenueQrSession({
+                                        eventId: e.id,
+                                        eventName: e.name,
+                                        sessionWindowId: w.id,
+                                        sessionLabel: w.session_label,
+                                      })
+                                    }
+                                  >
+                                    <QrCode size={12} style={{ marginRight: '0.2rem' }} /> Venue QR
+                                  </button>
+                                )}
                                 {w.is_closed ? (
                                   <span className="chip chip-inactive">Closed</span>
                                 ) : e.event_status === 'PUBLISHED' ? (
@@ -450,6 +480,15 @@ export function AdminEvents() {
           event={managingRoster}
           onClose={() => setManagingRoster(null)}
           onUpdated={() => void load()}
+        />
+      ) : null}
+      {venueQrSession ? (
+        <VenueQrModal
+          eventId={venueQrSession.eventId}
+          eventName={venueQrSession.eventName}
+          sessionWindowId={venueQrSession.sessionWindowId}
+          sessionLabel={venueQrSession.sessionLabel}
+          onClose={() => setVenueQrSession(null)}
         />
       ) : null}
       {pendingDelete ? (
@@ -606,6 +645,10 @@ export function EventForm({
   async function save() {
     if (!termId) {
       toast('Select an academic term', 'error')
+      return
+    }
+    if (!templateId) {
+      toast('Please select a fine template for this event', 'error')
       return
     }
     const err = validateWindows(windows, startDate)
@@ -931,9 +974,9 @@ export function EventForm({
           </div>
         ))}
 
-        <Field label="Fine template">
-          <select value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
-            <option value="">None</option>
+        <Field label="Fine template *">
+          <select value={templateId} onChange={(e) => setTemplateId(e.target.value)} required>
+            <option value="">Select a fine template (Required)...</option>
             {published.map((t) => (
               <option key={t.template_id} value={t.template_id}>
                 {t.template_name}

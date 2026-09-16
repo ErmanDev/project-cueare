@@ -8,7 +8,7 @@ import '../../widgets/page_scaffold.dart';
 import 'my_attendance_screen.dart';
 import 'my_fines_screen.dart';
 import 'my_qr_screen.dart';
-import 'student_profile_screen.dart';
+import 'student_self_scanner_screen.dart';
 
 /// Student shell: Attendance · raised QR · Fines.
 class StudentHomeScreen extends ConsumerStatefulWidget {
@@ -32,6 +32,14 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
     }
   }
 
+  void _openScanner(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => const StudentSelfScannerScreen(),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -43,6 +51,11 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
           _ => 'Fines',
         }),
         actions: [
+          IconButton(
+            tooltip: 'Scan venue QR',
+            icon: const Icon(Icons.qr_code_scanner),
+            onPressed: () => _openScanner(context),
+          ),
           IconButton(
             tooltip: 'Change password',
             icon: const Icon(Icons.lock_outline),
@@ -77,7 +90,10 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
 }
 
 class _StudentNavBar extends StatelessWidget {
-  const _StudentNavBar({required this.index, required this.onSelect});
+  const _StudentNavBar({
+    required this.index,
+    required this.onSelect,
+  });
 
   final int index;
   final ValueChanged<int> onSelect;
@@ -89,81 +105,34 @@ class _StudentNavBar extends StatelessWidget {
       color: scheme.surfaceContainerLowest,
       elevation: 3,
       shadowColor: AppTheme.navyDeep.withValues(alpha: 0.18),
-      clipBehavior: Clip.none,
       child: SafeArea(
         top: false,
         child: SizedBox(
-          height: 72,
-          child: Stack(
-            clipBehavior: Clip.none,
-            alignment: Alignment.bottomCenter,
+          height: 64,
+          child: Row(
             children: [
-              Row(
-                children: [
-                  _StudentNavItem(
-                    icon: Icons.history_outlined,
-                    selectedIcon: Icons.history,
-                    label: 'Attendance',
-                    selected: index == 1,
-                    onTap: () => onSelect(1),
-                  ),
-                  const SizedBox(width: 80),
-                  _StudentNavItem(
-                    icon: Icons.payments_outlined,
-                    selectedIcon: Icons.payments,
-                    label: 'Fines',
-                    selected: index == 2,
-                    onTap: () => onSelect(2),
-                  ),
-                ],
+              _StudentNavItem(
+                icon: Icons.event_outlined,
+                selectedIcon: Icons.event,
+                label: 'Events',
+                selected: index == 0,
+                onTap: () => onSelect(0),
               ),
-              Positioned(
-                top: -14,
-                child: _QrOrb(
-                  selected: index == 0,
-                  onTap: () => onSelect(0),
-                ),
+              _StudentNavItem(
+                icon: Icons.history_outlined,
+                selectedIcon: Icons.history,
+                label: 'Attendance',
+                selected: index == 1,
+                onTap: () => onSelect(1),
+              ),
+              _StudentNavItem(
+                icon: Icons.payments_outlined,
+                selectedIcon: Icons.payments,
+                label: 'Fines',
+                selected: index == 2,
+                onTap: () => onSelect(2),
               ),
             ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _QrOrb extends StatelessWidget {
-  const _QrOrb({required this.selected, required this.onTap});
-
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Semantics(
-      button: true,
-      selected: selected,
-      label: 'QR',
-      child: Tooltip(
-        message: 'QR',
-        child: Material(
-          color: AppTheme.navy,
-          shape: const CircleBorder(),
-          elevation: selected ? 8 : 5,
-          shadowColor: AppTheme.navyDeep.withValues(alpha: 0.4),
-          child: InkWell(
-            customBorder: const CircleBorder(),
-            onTap: onTap,
-            child: SizedBox(
-              width: 58,
-              height: 58,
-              child: Icon(
-                selected ? Icons.qr_code_2 : Icons.qr_code_2_outlined,
-                color: scheme.onPrimary,
-                size: 28,
-              ),
-            ),
           ),
         ),
       ),

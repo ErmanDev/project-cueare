@@ -43,7 +43,6 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
 
   final MobileScannerController _controller = MobileScannerController(
     autoStart: false,
-    formats: const [BarcodeFormat.qrCode],
     detectionSpeed: DetectionSpeed.normal,
     detectionTimeoutMs: 800,
   );
@@ -148,9 +147,11 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
           return;
         }
       } else {
+        _lastCode = null;
         _flash(e.message, AppTheme.blockedColor);
       }
     } catch (e) {
+      _lastCode = null;
       if (mounted) _flash(ApiFailure.from(e).message, AppTheme.blockedColor);
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -159,7 +160,7 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
 
   Future<void> _showResult(ScanPreviewModel preview) async {
     final repo = ref.read(moderatorRepositoryProvider);
-    final decision = await ScanResultSheet.show(context, preview);
+    final result = await ScanResultSheet.show(context, preview);
     if (!mounted) return;
 
     if (!preview.canConfirm) {
@@ -168,9 +169,9 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
       return;
     }
 
-    if (decision == ScanDecision.confirm) {
+    if (result?.decision == ScanDecision.confirm) {
       try {
-        final log = await repo.confirm(preview);
+        final log = await repo.confirm(preview, note: result?.note);
         _confirmedThisSession++;
         ref.invalidate(myScansProvider);
         _flash(

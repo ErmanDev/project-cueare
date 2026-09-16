@@ -6,6 +6,7 @@ import '../../models/event_participant_model.dart';
 import '../../models/scan_preview_model.dart';
 import '../../models/section_model.dart';
 import '../../models/session_window_model.dart';
+import '../../models/self_scan_result_model.dart';
 import '../../models/student_event_model.dart';
 import '../../models/student_fine_model.dart';
 import '../../models/student_model.dart';
@@ -517,6 +518,13 @@ class StudentRepository {
     return (json['attendance'] as List<dynamic>)
         .map((e) => AttendanceLogModel.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  Future<SelfScanResultModel> selfScan(String qrToken) async {
+    final json = await _api.postJson(ApiEndpoints.studentSelfScan, {
+      'qrToken': qrToken,
+    });
+    return SelfScanResultModel.fromJson(json);
   }
 }
 

@@ -1,11 +1,18 @@
 import { titleCaseName } from '../students/roster.ts';
 import { ROLES } from '../types.ts';
-import { isPastDate } from './time.ts';
+import { isPastDate, parseIsoDateTime } from './time.ts';
 
-export function toIso(value: Date | string | null | undefined): string | null {
-  if (value == null) return null;
-  const d = value instanceof Date ? value : new Date(value);
-  return d.toISOString();
+export function toIso(value: Date | string | number | null | undefined): string | null {
+  if (value == null || value === '') return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.toISOString();
+  }
+  if (typeof value === 'string') {
+    const d = parseIsoDateTime(value) ?? new Date(value);
+    return Number.isNaN(d.getTime()) ? value : d.toISOString();
+  }
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
 export function userToApi(row: {
@@ -13,8 +20,8 @@ export function userToApi(row: {
   name: string;
   username: string;
   role: string;
-  created_at: Date;
-  updated_at: Date;
+  created_at: Date | string;
+  updated_at: Date | string;
 }): Record<string, unknown> {
   return {
     id: row.id,
@@ -38,8 +45,8 @@ export function studentToApi(row: {
   section: string | null;
   photo_url: string | null;
   user_id?: number | null;
-  created_at: Date;
-  updated_at: Date;
+  created_at: Date | string;
+  updated_at: Date | string;
 }): Record<string, unknown> {
   const firstName = titleCaseName(row.first_name);
   const middleName = titleCaseName(row.middle_name) || null;
@@ -72,8 +79,8 @@ export function studentAsUser(row: {
   middle_name?: string | null;
   last_name?: string | null;
   full_name: string;
-  created_at: Date;
-  updated_at: Date;
+  created_at: Date | string;
+  updated_at: Date | string;
 }): Record<string, unknown> {
   const firstName = titleCaseName(row.first_name);
   const middleName = titleCaseName(row.middle_name) || null;
@@ -96,12 +103,12 @@ export function eventToApi(
     academic_term_id: number;
     name: string;
     event_status: string;
-    event_start_date: Date;
-    event_end_date: Date;
+    event_start_date: Date | string;
+    event_end_date: Date | string;
     is_active: boolean;
     created_by: number;
-    created_at: Date;
-    updated_at: Date;
+    created_at: Date | string;
+    updated_at: Date | string;
   },
   now: Date = new Date(),
 ): Record<string, unknown> {

@@ -1,6 +1,7 @@
 import pg from 'pg';
 
 import { databaseDisplay, getConfig, type DatabaseConfig } from '../config.ts';
+import type { Queryable } from '../types.ts';
 import { addMissingAppColumns, addMissingConstraints, backfillEventRegistrations, dropTenantsIfPresent, importLegacyData, migrateLegacyTables, renameSnakeToPascal, schemaStatements, seedFoundation } from './schema.ts';
 
 const { Pool, types } = pg;
@@ -27,6 +28,10 @@ export function createPool(config: DatabaseConfig = getConfig().database, schema
     password: config.password,
     ssl: false,
     max: 10,
+  });
+
+  pool.on('error', (err) => {
+    console.error('[pg-pool] Unexpected error on idle client:', err.message);
   });
 
   const originalConnect = pool.connect.bind(pool) as typeof pool.connect;
@@ -96,10 +101,13 @@ export function poolDisplay(): string {
 }
 
 export async function withTransaction<T>(
-  pool: pg.Pool,
-  fn: (client: pg.PoolClient) => Promise<T>,
+  pool: pg.Pool | Queryable,
+  fn: (client: Queryable) => Promise<T>,
 ): Promise<T> {
-  const client = await pool.connect();
+  if (!('connect' in pool) || typeof (pool as any).connect !== 'function') {
+    return fn(pool);
+  }
+  const client = await (pool as pg.Pool).connect();
   try {
     await client.query('BEGIN');
     const result = await fn(client);

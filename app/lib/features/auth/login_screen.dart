@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/auth/auth_state.dart';
 import '../../core/theme/app_theme.dart';
 import '../../widgets/app_logo.dart';
+import 'server_config_screen.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -100,9 +101,26 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         ),
                       ],
                     ),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(32, 36, 32, 32),
-                      child: _cardBody(context),
+                    child: Stack(
+                      children: [
+                        Positioned(
+                          top: 12,
+                          right: 12,
+                          child: IconButton(
+                            tooltip: 'Server Settings',
+                            icon: const Icon(Icons.settings_outlined, color: Color(0xFF5C5E6B)),
+                            onPressed: () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => const ServerConfigScreen(canPop: true),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(32, 36, 32, 32),
+                          child: _cardBody(context),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -227,6 +245,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Text('Log in'),
+                ),
+                const SizedBox(height: 12),
+                TextButton.icon(
+                  onPressed: _busy
+                      ? null
+                      : () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) =>
+                                  const ServerConfigScreen(canPop: true),
+                            ),
+                          ),
+                  icon: const Icon(Icons.dns_outlined, size: 18),
+                  label: const Text('Server Settings'),
                 ),
               ],
             ),

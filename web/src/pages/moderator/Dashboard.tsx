@@ -1,6 +1,8 @@
-import { History, QrCode, RefreshCw } from 'lucide-react'
+import { useState } from 'react'
+import { History, QrCode, RefreshCw, ScreenShare } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
+import { VenueQrModal } from '../../components/VenueQrModal'
 import { Button, EmptyState, EventPanelSkeleton } from '../../components/ui'
 import { useAuth } from '../../lib/auth'
 import { fmtRange, fmtWeekday, initial } from '../../lib/format'
@@ -10,6 +12,16 @@ import { SessionOverride } from './SessionOverride'
 export function ModeratorDashboard() {
   const { user } = useAuth()
   const { events, selected, select, reload, loading, error } = useModerator()
+  const [venueQrSession, setVenueQrSession] = useState<{
+    eventId: number
+    eventName: string
+    sessionWindowId: number
+    sessionLabel: string
+  } | null>(null)
+
+  const activeWindow = selected?.session_windows.find(
+    (w) => w.id === selected.current_session_window_id,
+  ) ?? selected?.session_windows[0]
 
   return (
     <div className="home">
@@ -90,11 +102,36 @@ export function ModeratorDashboard() {
             >
               <QrCode size={28} /> Start scanning
             </Link>
+            {activeWindow ? (
+              <Button
+                variant="secondary"
+                style={{ minHeight: 48, fontSize: 16 }}
+                onClick={() =>
+                  setVenueQrSession({
+                    eventId: selected.id,
+                    eventName: selected.name,
+                    sessionWindowId: activeWindow.id,
+                    sessionLabel: activeWindow.session_label,
+                  })
+                }
+              >
+                <ScreenShare size={20} /> Display Venue QR Screen
+              </Button>
+            ) : null}
             <Link to="/scanner/history" className="btn btn-secondary">
               <History size={18} /> My scans today
             </Link>
           </div>
         </>
+      ) : null}
+      {venueQrSession ? (
+        <VenueQrModal
+          eventId={venueQrSession.eventId}
+          eventName={venueQrSession.eventName}
+          sessionWindowId={venueQrSession.sessionWindowId}
+          sessionLabel={venueQrSession.sessionLabel}
+          onClose={() => setVenueQrSession(null)}
+        />
       ) : null}
     </div>
   )

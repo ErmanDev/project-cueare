@@ -25,31 +25,46 @@ export function normaliseTime(value: string): string {
   return formatMinutes(minutes);
 }
 
-export function minutesOfDay(t: Date): number {
-  return t.getHours() * 60 + t.getMinutes();
+export function minutesOfDay(t: Date | string | number): number {
+  const d =
+    t instanceof Date
+      ? t
+      : typeof t === 'string'
+      ? (parseIsoDateTime(t) ?? new Date(t))
+      : new Date(t);
+  return d.getHours() * 60 + d.getMinutes();
 }
 
 export function overlaps(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
   return aStart < bEnd && bStart < aEnd;
 }
 
-export function startOfDay(t: Date): Date {
-  return new Date(t.getFullYear(), t.getMonth(), t.getDate());
+export function startOfDay(t: Date | string | number): Date {
+  const d =
+    t instanceof Date
+      ? t
+      : typeof t === 'string'
+      ? (parseIsoDateTime(t) ?? new Date(t))
+      : new Date(t);
+  const valid = Number.isNaN(d.getTime()) ? new Date(0) : d;
+  return new Date(valid.getFullYear(), valid.getMonth(), valid.getDate());
 }
 
-export function isSameDay(a: Date, b: Date): boolean {
+export function isSameDay(a: Date | string | number, b: Date | string | number): boolean {
+  const dA = startOfDay(a);
+  const dB = startOfDay(b);
   return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
+    dA.getFullYear() === dB.getFullYear() &&
+    dA.getMonth() === dB.getMonth() &&
+    dA.getDate() === dB.getDate()
   );
 }
 
-export function isPastDate(date: Date, relativeTo: Date = new Date()): boolean {
+export function isPastDate(date: Date | string | number, relativeTo: Date | string | number = new Date()): boolean {
   return startOfDay(date).getTime() < startOfDay(relativeTo).getTime();
 }
 
-export function isTodayOrFuture(date: Date, relativeTo: Date = new Date()): boolean {
+export function isTodayOrFuture(date: Date | string | number, relativeTo: Date | string | number = new Date()): boolean {
   return !isPastDate(date, relativeTo);
 }
 

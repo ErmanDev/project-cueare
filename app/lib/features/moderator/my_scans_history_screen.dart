@@ -73,9 +73,15 @@ class MyScansHistoryScreen extends ConsumerWidget {
                       ),
                     ),
                   ),
-                  title: Text(l.studentName ?? 'Student #${l.studentId}'),
+                  title: Text(
+                    l.studentName ?? 'Student #${l.studentId}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                   subtitle: Text(
                     '${l.studentIdCode ?? ''} · ${l.sessionLabel ?? ''}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                   trailing: Text(Fmt.time(l.scannedAt)),
                 );

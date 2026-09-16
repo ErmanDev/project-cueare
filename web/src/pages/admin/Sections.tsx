@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useState } from 'react'
-import { BookOpen, Calendar, GraduationCap, Layers, Plus, Search, Users, X } from 'lucide-react'
+import { Calendar, GraduationCap, Layers, Plus, Search, X } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 
 import { Button, EmptyState, Field, Modal, TableSkeleton } from '../../components/ui'

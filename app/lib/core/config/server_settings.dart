@@ -1,5 +1,6 @@
 import 'dart:io' show Platform;
 
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -71,19 +72,53 @@ class ServerSettingsNotifier extends AsyncNotifier<ServerSettings?> {
   static const _portKey = 'server_port';
   static const _httpsKey = 'server_https';
 
+  static Future<bool> testHealth(ServerSettings settings) async {
+    try {
+      final dio = Dio(
+        BaseOptions(
+          baseUrl: settings.baseUrl,
+          connectTimeout: const Duration(seconds: 3),
+          receiveTimeout: const Duration(seconds: 3),
+        ),
+      );
+      final res = await dio.get<Map<String, dynamic>>('/api/v1/health');
+      return res.statusCode == 200 && res.data?['status'] == 'ok';
+    } catch (_) {
+      return false;
+    }
+  }
+
   @override
   Future<ServerSettings?> build() async {
     final prefs = await SharedPreferences.getInstance();
     final host = prefs.getString(_hostKey);
     final port = prefs.getInt(_portKey);
+    final defaultSettings =
+        AppConfig.defaultServerSettings ?? ServerSettings.localDev();
+
     if (host != null && host.isNotEmpty && port != null) {
-      return ServerSettings(
+      final savedSettings = ServerSettings(
         host: host,
         port: port,
         https: prefs.getBool(_httpsKey) ?? false,
       );
+
+      // Fast check if saved settings is reachable
+      final savedOk = await testHealth(savedSettings);
+      if (savedOk) {
+        return savedSettings;
+      }
+
+      // If saved settings failed, test default fallback
+      final defaultOk = await testHealth(defaultSettings);
+      if (defaultOk) {
+        return defaultSettings;
+      }
+
+      return savedSettings;
     }
-    return AppConfig.defaultServerSettings ?? ServerSettings.localDev();
+
+    return defaultSettings;
   }
 
   Future<void> save(ServerSettings settings) async {

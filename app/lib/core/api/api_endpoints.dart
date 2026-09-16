@@ -55,6 +55,7 @@ abstract class ApiEndpoints {
   // Student
   static const studentEvents = '$prefix/student/me/events';
   static const studentFines = '$prefix/student/me/fines';
+  static const studentSelfScan = '$prefix/attendance/event-qr/self-scan';
   static String studentEventQr(int eventId) =>
       '$prefix/student/me/events/$eventId/qr';
   static String studentQr(String code) =>

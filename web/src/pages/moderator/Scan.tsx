@@ -21,11 +21,11 @@ export function ModeratorScan() {
   const [confirmed, setConfirmed] = useState(0)
   const lastCode = useRef<{ code: string; at: number } | null>(null)
 
-  async function previewCode(raw: string) {
+  async function previewCode(raw: string, isManual = false) {
     const code = raw.trim()
     if (!code || !selected || busy) return
     const now = Date.now()
-    if (lastCode.current && lastCode.current.code === code && now - lastCode.current.at < 2500) {
+    if (!isManual && lastCode.current && lastCode.current.code === code && now - lastCode.current.at < 2500) {
       return
     }
     lastCode.current = { code, at: now }
@@ -139,7 +139,7 @@ export function ModeratorScan() {
             className="form-grid"
             onSubmit={(e) => {
               e.preventDefault()
-              void previewCode(manual)
+              void previewCode(manual, true)
               setManual('')
             }}
           >

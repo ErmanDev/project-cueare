@@ -1,4 +1,4 @@
-import { type CSSProperties, type FormEvent, type ReactNode, useEffect } from 'react'
+import { type CSSProperties, type FormEvent, type ReactNode, useEffect, useRef } from 'react'
 
 import { Logo } from './Logo'
 
@@ -10,6 +10,7 @@ export function Button({
   disabled,
   className = '',
   style,
+  title,
 }: {
   children: ReactNode
   onClick?: () => void
@@ -18,6 +19,7 @@ export function Button({
   disabled?: boolean
   className?: string
   style?: CSSProperties
+  title?: string
 }) {
   return (
     <button
@@ -26,6 +28,7 @@ export function Button({
       onClick={onClick}
       disabled={disabled}
       style={style}
+      title={title}
     >
       {children}
     </button>
@@ -78,17 +81,22 @@ export function Modal({
   wide?: boolean
   stacked?: boolean
 }) {
+  const onCloseRef = useRef(onClose)
+  useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
+
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') onCloseRef.current()
     }
     window.addEventListener('keydown', onKey)
     return () => {
       window.removeEventListener('keydown', onKey)
       previous?.focus()
     }
-  }, [onClose])
+  }, [])
 
   return (
     <div

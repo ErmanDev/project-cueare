@@ -5,7 +5,7 @@ import { Button, CardListSkeleton, EmptyState, Field, FormActions, Modal, onSubm
 import { api } from '../../lib/api'
 import { initial } from '../../lib/format'
 import { useToast } from '../../lib/toast'
-import type { Student, StudentPage, User } from '../../lib/types'
+import type { User } from '../../lib/types'
 
 type Student = {
   id: number
@@ -39,19 +39,6 @@ export function AdminModerators() {
   useEffect(() => {
     void load()
   }, [])
-
-  async function demote(m: User) {
-    if (!window.confirm(`Demote ${m.name} to student? They will sign in as a student again.`)) {
-      return
-    }
-    try {
-      await api.post(`/admin/moderators/${m.id}/demote`)
-      toast('Demoted to student')
-      await load()
-    } catch (e) {
-      toast(e instanceof Error ? e.message : 'Demote failed', 'error')
-    }
-  }
 
   async function remove(m: User) {
     if (!window.confirm(`Delete moderator "${m.name}"?`)) return
@@ -90,9 +77,13 @@ export function AdminModerators() {
           {list.map((m) => (
             <article key={m.id} className="card mod-card">
               <div className="mod-avatar">{initial(m.name)}</div>
-              <div className="mod-info">
-                <h3>{m.name}</h3>
-                <p className="muted">@{m.username}</p>
+              <div className="mod-info" style={{ minWidth: 0 }}>
+                <h3 style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {m.name}
+                </h3>
+                <p className="muted" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  @{m.username}
+                </p>
               </div>
               <button className="icon-btn edit-btn" title="Edit" onClick={() => setForm(m)}>
                 <Pencil size={18} />
@@ -113,16 +104,6 @@ export function AdminModerators() {
           }}
         />
       ) : form ? (
-        <ModeratorEditForm
-          existing={form}
-          onClose={() => setForm(null)}
-          onSaved={() => {
-            setForm(null)
-            void load()
-          }}
-        />
-      ) : null}
-      {form && form !== 'new' ? (
         <ModeratorEditForm
           existing={form}
           onClose={() => setForm(null)}
@@ -305,13 +286,4 @@ function ModeratorEditForm({
       </form>
     </Modal>
   )
-}
-
-function useDebounced(value: string, ms: number): string {
-  const [v, setV] = useState(value)
-  useEffect(() => {
-    const t = window.setTimeout(() => setV(value), ms)
-    return () => window.clearTimeout(t)
-  }, [value, ms])
-  return v
 }

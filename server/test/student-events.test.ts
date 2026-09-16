@@ -54,7 +54,8 @@ describe('Student event QR', () => {
     });
     const event = await q.insertEvent(pool, {
       name: 'Acquaintance',
-      eventDate: new Date(2026, 8, 14),
+      eventStartDate: new Date(2026, 8, 14),
+      eventEndDate: new Date(2026, 8, 14),
       isActive: true,
       createdBy: admin.id,
     });

@@ -9,6 +9,7 @@ import '../../widgets/page_scaffold.dart';
 import '../../widgets/status_chip.dart';
 import 'event_qr_screen.dart';
 import 'student_providers.dart';
+import 'student_self_scanner_screen.dart';
 
 class MyQrScreen extends ConsumerWidget {
   const MyQrScreen({super.key});
@@ -32,11 +33,75 @@ class MyQrScreen extends ConsumerWidget {
                   'When a moderator or admin adds you to an event, it will show here.',
             );
           }
-          return ListView.separated(
+          return ListView(
             padding: AppListPadding.standard,
-            itemCount: list.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 8),
-            itemBuilder: (context, i) => _EventCard(event: list[i]),
+            children: [
+              Card(
+                color: Theme.of(context).colorScheme.primaryContainer,
+                child: InkWell(
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const StudentSelfScannerScreen(),
+                      ),
+                    );
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.qr_code_scanner,
+                          size: 32,
+                          color: Theme.of(context).colorScheme.onPrimaryContainer,
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Scan Venue QR',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleMedium
+                                    ?.copyWith(
+                                      fontWeight: FontWeight.bold,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onPrimaryContainer,
+                                    ),
+                              ),
+                              Text(
+                                'Point camera at event screen token',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onPrimaryContainer
+                                          .withValues(alpha: 0.8),
+                                    ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Icon(
+                          Icons.chevron_right,
+                          color: Theme.of(context).colorScheme.onPrimaryContainer,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              for (int i = 0; i < list.length; i++) ...[
+                if (i > 0) const SizedBox(height: 8),
+                _EventCard(event: list[i]),
+              ],
+            ],
           );
         },
       ),

@@ -55,15 +55,27 @@ class ModeratorsScreen extends ConsumerWidget {
                         m.name.isNotEmpty ? m.name[0].toUpperCase() : '?',
                       ),
                     ),
-                    title: Text(m.name),
-                    subtitle: Text('@${m.username}'),
+                    title: Text(
+                      m.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    subtitle: Text(
+                      '@${m.username}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         if (m.studentId != null)
-                          TextButton(
+                          IconButton(
+                            tooltip: 'Demote to student',
+                            icon: Icon(
+                              Icons.person_remove_outlined,
+                              color: scheme.secondary,
+                            ),
                             onPressed: () => _demote(context, ref, m),
-                            child: const Text('Demote to student'),
                           ),
                         IconButton(
                           tooltip: 'Edit / reset password',

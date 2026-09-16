@@ -1100,7 +1100,7 @@ export async function addMissingAppColumns(db: Queryable): Promise<void> {
 
             IF v_action = 'IN' THEN
                 IF v_checked_in IS NOT NULL THEN v_result := 'NO_CHANGE'; v_reason := 'ALREADY_CHECKED_IN'; v_effective_at := v_checked_in;
-                ELSIF v_now < v_in_open OR v_now > v_in_close THEN v_reason := 'OUTSIDE_CHECKIN_WINDOW';
+                ELSIF v_now < v_in_open THEN v_reason := 'SESSION_NOT_STARTED';
                 ELSE
                     IF v_attendance_record_id IS NULL THEN
                         INSERT INTO "AttendanceRecords" ("eventParticipantId", "checkedInAtUtc", "lastChangedByUserId", "lastChangedAtUtc")
@@ -1124,6 +1124,9 @@ export async function addMissingAppColumns(db: Queryable): Promise<void> {
                     VALUES (v_attendance_record_id, 'CHECK_OUT', v_checked_in, v_checked_out, v_checked_in, v_now, v_is_excused, v_is_excused, p_authenticated_user_id);
                     v_checked_out := v_now; v_result := 'ACCEPTED'; v_effective_at := v_now;
                 END IF;
+            END IF;
+            IF v_result = 'ACCEPTED' AND v_qr_id IS NOT NULL THEN
+                UPDATE "EventSessionQrTokens" SET "revokedAtUtc" = v_now, "revokedByUserId" = p_authenticated_user_id, "revocationReason" = 'Single-use self-scan' WHERE "eventSessionQrTokenId" = v_qr_id AND "revokedAtUtc" IS NULL;
             END IF;
         END IF;
 

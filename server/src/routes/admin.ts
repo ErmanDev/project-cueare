@@ -188,54 +188,53 @@ adminRouter.get(
   }),
 );
 
-adminRouter.put(
-  '/students/:id',
-  asyncHandler(async (req, res) => {
-    const id = parsePathId(req.params.id);
-    const existing = await q.getStudentById(getPool(), id);
-    if (!existing) throw notFound('Student not found');
-    const body = jsonObject(req);
-    const code = optionalString(body, 'student_id_code');
-    const fullName = optionalString(body, 'full_name');
-    const hasSection = hasKey(body, 'section');
-    const hasPhoto = hasKey(body, 'photo_url');
-    const section = optionalString(body, 'section');
-    const photoUrl = optionalString(body, 'photo_url');
-    const safeCode = code == null ? null : requireValidStudentCode(code);
+const handleUpdateStudent = asyncHandler(async (req, res) => {
+  const id = parsePathId(req.params.id);
+  const existing = await q.getStudentById(getPool(), id);
+  if (!existing) throw notFound('Student not found');
+  const body = jsonObject(req);
+  const code = optionalString(body, 'student_id_code');
+  const fullName = optionalString(body, 'full_name');
+  const hasSection = hasKey(body, 'section');
+  const hasPhoto = hasKey(body, 'photo_url');
+  const section = optionalString(body, 'section');
+  const photoUrl = optionalString(body, 'photo_url');
+  const safeCode = code == null ? null : requireValidStudentCode(code);
 
-    if (safeCode && safeCode !== existing.student_id_code) {
-      const taken = await q.getStudentByCode(getPool(), safeCode);
-      if (taken && taken.id !== id) throw conflict(`Student code "${safeCode}" already exists`);
-    }
+  if (safeCode && safeCode !== existing.student_id_code) {
+    const taken = await q.getStudentByCode(getPool(), safeCode);
+    if (taken && taken.id !== id) throw conflict(`Student code "${safeCode}" already exists`);
+  }
 
-    const updated = await q.updateStudent(getPool(), id, {
-      studentIdCode: safeCode ?? undefined,
-      fullName: fullName ?? undefined,
-      hasSection,
-      section,
-      hasPhoto,
-      photoUrl,
-    });
-    service(req).invalidateStudent(existing);
-    service(req).rememberStudent(updated);
-    res.json({
-      ...studentToApi(updated),
-      qr_payload: service(req).qrPayloadFor(updated),
-    });
-  }),
-);
+  const updated = await q.updateStudent(getPool(), id, {
+    studentIdCode: safeCode ?? undefined,
+    fullName: fullName ?? undefined,
+    hasSection,
+    section,
+    hasPhoto,
+    photoUrl,
+  });
+  service(req).invalidateStudent(existing);
+  service(req).rememberStudent(updated);
+  res.json({
+    ...studentToApi(updated),
+    qr_payload: service(req).qrPayloadFor(updated),
+  });
+});
 
-adminRouter.delete(
-  '/students/:id',
-  asyncHandler(async (req, res) => {
-    const id = parsePathId(req.params.id);
-    const existing = await q.getStudentById(getPool(), id);
-    if (!existing) throw notFound('Student not found');
-    await q.deleteStudent(getPool(), id);
-    service(req).invalidateStudent(existing);
-    res.status(204).end();
-  }),
-);
+const handleDeleteStudent = asyncHandler(async (req, res) => {
+  const id = parsePathId(req.params.id);
+  const existing = await q.getStudentById(getPool(), id);
+  if (!existing) throw notFound('Student not found');
+  await q.deleteStudent(getPool(), id);
+  service(req).invalidateStudent(existing);
+  res.status(204).end();
+});
+
+adminRouter.put('/students/:id', handleUpdateStudent);
+adminRouter.post('/students/:id/update', handleUpdateStudent);
+adminRouter.delete('/students/:id', handleDeleteStudent);
+adminRouter.post('/students/:id/delete', handleDeleteStudent);
 
 // --- academics ---
 
@@ -926,6 +925,20 @@ adminRouter.delete(
   }),
 );
 
+adminRouter.post(
+  '/events/:id/delete',
+  asyncHandler(async (req, res) => {
+    const id = parsePathId(req.params.id);
+    const existing = await q.getEventById(getPool(), id);
+    if (!existing) throw notFound('Event not found');
+    await withTransaction(getPool(), async (client) => {
+      await q.deleteEvent(client, id);
+    });
+    service(req).invalidateEvent(id);
+    res.status(200).json({ success: true });
+  }),
+);
+
 // --- session windows ---
 
 adminRouter.get(
@@ -1025,7 +1038,7 @@ adminRouter.post(
     const username = requireString(body, 'username');
     const password = requireString(body, 'password');
     if (password.length < 4) throw badRequest('Password must be at least 4 characters');
-    await assertSpecialModeratorIdFree(getPool(), username);
+    await q.assertSpecialModeratorIdFree(getPool(), username);
     const created = await q.insertUser(getPool(), {
       name,
       username,
@@ -1114,7 +1127,7 @@ adminRouter.put(
     const username = optionalString(body, 'username');
     const password = optionalString(body, 'password');
     if (username && username !== existing.username) {
-      await assertSpecialModeratorIdFree(getPool(), username, id);
+      await q.assertSpecialModeratorIdFree(getPool(), username, id);
     }
     if (password && password.length < 4) {
       throw badRequest('Password must be at least 4 characters');

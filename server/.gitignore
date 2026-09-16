@@ -19,3 +19,6 @@ attendance.db-*
 jwt_secret.txt
 .env
 logs/
+.iis-tmp/
+dist-iis/
+

@@ -13,9 +13,13 @@ import {
   isSameDay,
   minutesOfDay,
   overlaps,
+  parseIsoDateTime,
   parseMinutes,
 } from '../utils/time.ts';
 import {
+  extractCandidatePayloads,
+  extractStudentCodeFromRaw,
+  isValidStudentCode,
   requirePayloadSize,
   requireValidStudentCode,
 } from '../utils/studentCode.ts';
@@ -109,6 +113,16 @@ export class AttendanceService {
     if (this.qrHmacSecret) {
       throw badRequest('QR payload is not signed');
     }
+
+    if (isValidStudentCode(trimmed)) {
+      return requireValidStudentCode(trimmed);
+    }
+
+    const extracted = extractStudentCodeFromRaw(trimmed);
+    if (extracted) {
+      return extracted;
+    }
+
     return requireValidStudentCode(trimmed);
   }
 
@@ -135,7 +149,24 @@ export class AttendanceService {
 
   async autoDetectWindow(eventId: number, at?: Date): Promise<SessionWindowRow | null> {
     const windows = await this.windowsForEvent(eventId);
-    return pickWindowForTime(windows, at ?? this.now());
+    const time = at ?? this.now();
+    const exact = pickWindowForTime(windows, time);
+    if (exact) return exact;
+
+    // Fallback for LATE check-in: pick latest started window on same day that is not closed
+    const minutes = minutesOfDay(time);
+    let latestStarted: SessionWindowRow | null = null;
+    let maxStart = -1;
+    for (const w of windows) {
+      if (w.is_closed) continue;
+      if (w.session_date && !isSameDay(time, new Date(`${w.session_date}T00:00:00`))) continue;
+      const start = parseMinutes(w.start_time);
+      if (start != null && minutes >= start && start > maxStart) {
+        maxStart = start;
+        latestStarted = w;
+      }
+    }
+    return latestStarted;
   }
 
   async resolveWindow(args: {
@@ -185,7 +216,7 @@ export class AttendanceService {
   }): void {
     const t = args.at ?? this.now();
     const eventDay = args.window.session_date
-      ? new Date(`${args.window.session_date}T00:00:00`)
+      ? parseIsoDateTime(args.window.session_date) ?? new Date(`${args.window.session_date}T00:00:00`)
       : args.event.event_start_date;
     if (args.window.is_closed) throw conflict(`Session "${args.window.session_label}" is closed`);
     if (!isSameDay(t, eventDay)) {
@@ -219,22 +250,24 @@ export class AttendanceService {
       );
     }
     const isOut = args.direction === DIRECTION.out;
-    const closes = parseMinutes(isOut ? args.window.out_end ?? args.window.end_time : args.window.end_time) ?? end;
     const opens = isOut ? parseMinutes(args.window.out_start ?? args.window.start_time) ?? start : start;
-    if (minutes < opens) {
-      throw conflict(`${isOut ? 'Check-out' : 'Check-in'} for "${args.window.session_label}" has not opened yet`);
+    if (!isOut && minutes < opens) {
+      throw conflict(`Check-in for "${args.window.session_label}" has not opened yet`);
     }
-    if (minutes >= closes) {
-      throw conflict(
-        `${isOut ? 'Check-out' : 'Check-in'} for "${args.window.session_label}" has closed`,
-        {
-          code: 'SESSION_ENDED',
-          session_label: args.window.session_label,
-          start_time: args.window.start_time,
-          end_time: args.window.end_time,
-          server_time: t.toISOString(),
-        },
-      );
+    if (isOut) {
+      const closes = parseMinutes(args.window.out_end ?? args.window.end_time) ?? end;
+      if (minutes >= closes) {
+        throw conflict(
+          `Check-out for "${args.window.session_label}" has closed`,
+          {
+            code: 'SESSION_ENDED',
+            session_label: args.window.session_label,
+            start_time: args.window.start_time,
+            end_time: args.window.end_time,
+            server_time: t.toISOString(),
+          },
+        );
+      }
     }
   }
 
@@ -355,11 +388,33 @@ export class AttendanceService {
     if (isToken && !token) {
       throw notFound('QR pass is invalid or revoked for this event');
     }
-    const code = token ? token.student_id_code : this.studentCodeFromPayload(payload);
-    const student = token
-      ? await q.getStudentById(this.pool, token.student_id)
-      : code ? await this.catalog.getStudentByCode(code) : null;
-    if (!student) throw notFound(`No student found for code "${code}"`);
+    let student: StudentRow | null = null;
+    if (token) {
+      student = await q.getStudentById(this.pool, token.student_id);
+    } else {
+      try {
+        const code = this.studentCodeFromPayload(payload);
+        student = await this.catalog.getStudentByCode(code);
+      } catch {
+        /* proceed to candidate fallback */
+      }
+
+      if (!student) {
+        const parsed = extractCandidatePayloads(payload);
+        for (const candidateCode of parsed.codes) {
+          student = await this.catalog.getStudentByCode(candidateCode);
+          if (student) break;
+        }
+        if (!student) {
+          for (const candidateName of parsed.names) {
+            student = await q.getStudentByCodeOrName(this.pool, candidateName);
+            if (student) break;
+          }
+        }
+      }
+    }
+
+    if (!student) throw notFound(`Student not found for scanned QR code`);
     const { window, mode } = await this.resolveWindow({
       eventId: args.eventId,
       overrideWindowId: args.sessionWindowId,
@@ -532,6 +587,13 @@ export function isLateCheckIn(window: SessionWindowRow, at: Date): boolean {
   return minutesOfDay(at) > lateAfter;
 }
 
+/** Check-out before `out_start` (or `end_time` if unset) is EARLY OUT, allowed with note. */
+export function isEarlyCheckOut(window: SessionWindowRow, at: Date): boolean {
+  const outStart = parseMinutes(window.out_start ?? window.end_time);
+  if (outStart == null) return false;
+  return minutesOfDay(at) < outStart;
+}
+
 export function pickWindowForTime(
   windows: SessionWindowRow[],
   at: Date,
@@ -560,6 +622,9 @@ export function previewToApi(preview: ScanPreview): Record<string, unknown> {
   const isLate =
     preview.direction.direction === DIRECTION.in &&
     isLateCheckIn(preview.window, preview.serverTime);
+  const isEarlyOut =
+    preview.direction.direction === DIRECTION.out &&
+    isEarlyCheckOut(preview.window, preview.serverTime);
   const json: Record<string, unknown> = {
     student: {
       id: preview.student.id,
@@ -578,6 +643,7 @@ export function previewToApi(preview: ScanPreview): Record<string, unknown> {
     },
     computed_direction: preview.direction.direction,
     is_late: isLate,
+    is_early_out: isEarlyOut,
     can_confirm: preview.direction.canScan,
     server_time: preview.serverTime.toISOString(),
     existing_scans: preview.existing.map((e) => ({
@@ -590,6 +656,9 @@ export function previewToApi(preview: ScanPreview): Record<string, unknown> {
   } else if (isLate) {
     const cutoff = preview.window.late_after ?? preview.window.start_time;
     json.message = `Arrived after ${cutoff} — will be marked LATE`;
+  } else if (isEarlyOut) {
+    const cutoff = preview.window.out_start ?? preview.window.end_time;
+    json.message = `Leaving before ${cutoff} — please state emergency/reason note`;
   }
   return json;
 }

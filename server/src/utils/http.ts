@@ -50,11 +50,13 @@ export function requireInt(body: Record<string, unknown>, key: string): number {
 
 export function optionalInt(body: Record<string, unknown>, key: string): number | null {
   const v = body[key];
-  if (v == null) return null;
+  if (v == null || v === '') return null;
   if (typeof v === 'number' && Number.isInteger(v)) return v;
   if (typeof v === 'string') {
-    const parsed = Number.parseInt(v, 10);
-    if (!Number.isNaN(parsed) && String(parsed) === v.trim()) return parsed;
+    const trimmed = v.trim();
+    if (!trimmed) return null;
+    const parsed = Number.parseInt(trimmed, 10);
+    if (!Number.isNaN(parsed) && /^-?\d+$/.test(trimmed)) return parsed;
   }
   throw badRequest(`Field "${key}" must be an integer`);
 }
@@ -64,16 +66,18 @@ export function optionalBool(body: Record<string, unknown>, key: string): boolea
   if (v == null) return null;
   if (typeof v === 'boolean') return v;
   if (typeof v === 'string') {
-    if (v === 'true' || v === '1') return true;
-    if (v === 'false' || v === '0') return false;
+    const trimmed = v.trim().toLowerCase();
+    if (trimmed === 'true' || trimmed === '1') return true;
+    if (trimmed === 'false' || trimmed === '0' || trimmed === '') return false;
   }
   if (typeof v === 'number') return v !== 0;
   throw badRequest(`Field "${key}" must be a boolean`);
 }
 
 export function parsePathId(raw: string): number {
-  const id = Number.parseInt(raw, 10);
-  if (Number.isNaN(id) || String(id) !== raw) {
+  const trimmed = raw.trim();
+  const id = Number.parseInt(trimmed, 10);
+  if (Number.isNaN(id) || !/^-?\d+$/.test(trimmed)) {
     throw badRequest(`Invalid id "${raw}"`);
   }
   return id;
@@ -88,9 +92,9 @@ export function queryString(req: Request, key: string): string | null {
 
 export function queryInt(req: Request, key: string): number | null {
   const v = queryString(req, key);
-  if (v == null) return null;
+  if (v == null || v === '') return null;
   const parsed = Number.parseInt(v, 10);
-  if (Number.isNaN(parsed)) throw badRequest(`Query "${key}" must be an integer`);
+  if (Number.isNaN(parsed) || !/^-?\d+$/.test(v)) throw badRequest(`Query "${key}" must be an integer`);
   return parsed;
 }
 
@@ -111,4 +115,37 @@ export function parseDate(body: Record<string, unknown>, key: string): Date {
 
 export function hasKey(body: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(body, key);
+}
+
+export function cleanInetIp(ip: string | null | undefined): string | null {
+  if (!ip) return null;
+  let raw = ip.trim();
+  if (raw.includes(',')) {
+    raw = raw.split(',')[0]!.trim();
+  }
+  if (raw.startsWith('::ffff:')) {
+    raw = raw.slice(7);
+  }
+  const ipv4PortMatch = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(:\d+)?$/.exec(raw);
+  if (ipv4PortMatch) {
+    return ipv4PortMatch[1]!;
+  }
+  const ipv6BracketMatch = /^\[([a-fA-F0-9:]+)\](:\d+)?$/.exec(raw);
+  if (ipv6BracketMatch) {
+    return ipv6BracketMatch[1]!;
+  }
+  if (/^[a-fA-F0-9:]+$/.test(raw)) {
+    return raw;
+  }
+  return null;
+}
+
+export function getCleanClientIp(req: Request): string {
+  const forwarded = req.headers?.['x-forwarded-for'];
+  const raw = Array.isArray(forwarded)
+    ? forwarded[0]
+    : typeof forwarded === 'string'
+      ? forwarded.split(',')[0]
+      : req.ip || req.socket?.remoteAddress;
+  return cleanInetIp(raw) ?? '127.0.0.1';
 }

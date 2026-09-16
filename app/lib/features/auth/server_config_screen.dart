@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/api_endpoints.dart';
+import '../../core/config/app_config.dart';
 import '../../core/config/server_settings.dart';
 import '../../widgets/error_banner.dart';
 
@@ -86,10 +87,42 @@ class _ServerConfigScreenState extends ConsumerState<ServerConfigScreen> {
       showSnack(context, 'Enter the IIS host name, like attendance.yourschool.edu');
       return;
     }
+
+    setState(() => _testing = true);
+    final ok = await ServerSettingsNotifier.testHealth(settings);
+    setState(() => _testing = false);
+
+    if (!ok) {
+      final defaultSettings = AppConfig.defaultServerSettings ?? ServerSettings.localDev();
+      final defaultOk = await ServerSettingsNotifier.testHealth(defaultSettings);
+      if (defaultOk && defaultSettings.baseUrl != settings.baseUrl) {
+        await ref.read(serverSettingsProvider.notifier).save(defaultSettings);
+        if (!mounted) return;
+        showSnack(
+          context,
+          'Could not reach ${settings.display}. Switched to default server (${defaultSettings.display}).',
+        );
+        if (widget.canPop) Navigator.of(context).pop();
+        return;
+      }
+    }
+
     await ref.read(serverSettingsProvider.notifier).save(settings);
     if (!mounted) return;
     showSnack(context, 'Server set to ${settings.display}');
     if (widget.canPop) Navigator.of(context).pop();
+  }
+
+  Future<void> _reset() async {
+    await ref.read(serverSettingsProvider.notifier).clear();
+    final defaultSettings =
+        AppConfig.defaultServerSettings ?? ServerSettings.localDev();
+    if (!mounted) return;
+    setState(() {
+      _controller.text = defaultSettings.display;
+      _testResult = null;
+    });
+    showSnack(context, 'Reset to default (${defaultSettings.display})');
   }
 
   @override
@@ -183,6 +216,12 @@ class _ServerConfigScreenState extends ConsumerState<ServerConfigScreen> {
                   onPressed: _save,
                   icon: const Icon(Icons.save),
                   label: const Text('Save & continue'),
+                ),
+                const SizedBox(height: 8),
+                TextButton.icon(
+                  onPressed: _testing ? null : _reset,
+                  icon: const Icon(Icons.restore),
+                  label: const Text('Reset to default server'),
                 ),
                 const SizedBox(height: 24),
                 Text(

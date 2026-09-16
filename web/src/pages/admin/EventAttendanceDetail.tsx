@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { ArrowLeft, LockKeyhole, Search, UserCheck } from 'lucide-react'
+import { ArrowLeft, LockKeyhole, QrCode, Search, UserCheck } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
 
+import { VenueQrModal } from '../../components/VenueQrModal'
 import { Button, EmptyState, Field, FormActions, Modal, TableSkeleton, onSubmit } from '../../components/ui'
 import { api } from '../../lib/api'
 import { fmtDateTime, fmtWeekday, phpAmount } from '../../lib/format'
@@ -31,6 +32,12 @@ export function EventAttendanceDetail() {
   const [revision, setRevision] = useState(0)
   const [syncing, setSyncing] = useState(false)
   const [closing, setClosing] = useState(false)
+  const [venueQrSession, setVenueQrSession] = useState<{
+    eventId: number
+    eventName: string
+    sessionWindowId: number
+    sessionLabel: string
+  } | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [manualTarget, setManualTarget] = useState<EventParticipant | null>(null)
   const [manualOptionKey, setManualOptionKey] = useState<string | undefined>()
@@ -209,12 +216,31 @@ export function EventAttendanceDetail() {
         {summary.sessions.length === 0 ? <p className="muted">No sessions configured.</p> : (
           <div className="table-wrap">
             <table className="data">
-              <thead><tr><th>Session</th><th>Checked in</th><th>Checked out</th><th>Pending</th><th>Absent</th><th>Excused</th></tr></thead>
+              <thead><tr><th>Session</th><th>Checked in</th><th>Checked out</th><th>Pending</th><th>Absent</th><th>Excused</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
               <tbody>{summary.sessions.map((item) => {
                 const session = event.session_windows.find((window) => window.id === item.session_id)
+                const sessionLabel = session?.session_label ?? `Session #${item.session_id}`
                 return <tr key={item.session_id}>
-                  <td><strong>{session?.session_label ?? `Session #${item.session_id}`}</strong><br /><span className="muted">{item.is_closed ? 'Closed' : 'Open'}</span></td>
+                  <td><strong>{sessionLabel}</strong><br /><span className="muted">{item.is_closed ? 'Closed' : 'Open'}</span></td>
                   <td>{item.checked_in}</td><td>{item.checked_out}</td><td>{item.pending}</td><td>{item.absent}</td><td>{item.excused}</td>
+                  <td style={{ textAlign: 'right' }}>
+                    <Button
+                      variant="secondary"
+                      style={{ padding: '0.25rem 0.6rem', fontSize: '0.8rem' }}
+                      disabled={item.is_closed}
+                      onClick={() =>
+                        setVenueQrSession({
+                          eventId: event.id,
+                          eventName: event.name,
+                          sessionWindowId: item.session_id,
+                          sessionLabel,
+                        })
+                      }
+                      title="Display rotating venue QR code for student self-scan"
+                    >
+                      <QrCode size={13} style={{ marginRight: '0.25rem' }} /> Venue QR
+                    </Button>
+                  </td>
                 </tr>
               })}</tbody>
             </table>
@@ -286,6 +312,15 @@ export function EventAttendanceDetail() {
           <FormActions onCancel={() => setManualTarget(null)} submitLabel={selectedOption?.mode === 'out' ? 'Check out' : 'Check in'} busy={manualBusy} />
         </form>
       </Modal> : null}
+      {venueQrSession ? (
+        <VenueQrModal
+          eventId={venueQrSession.eventId}
+          eventName={venueQrSession.eventName}
+          sessionWindowId={venueQrSession.sessionWindowId}
+          sessionLabel={venueQrSession.sessionLabel}
+          onClose={() => setVenueQrSession(null)}
+        />
+      ) : null}
     </>
   )
 }

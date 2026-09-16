@@ -69,6 +69,8 @@ export function createApp(service?: AttendanceService): Express {
 
   mountSwagger(app);
   mountRestApi(app, '/api');
+  mountRestApi(app, '/api/v1');
+  mountRestApi(app, '/v1');
   // Unprefixed aliases so older APKs that call /auth/login still work.
   mountRestApi(app);
 

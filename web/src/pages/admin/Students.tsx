@@ -41,17 +41,26 @@ export function AdminStudents() {
 
   async function load(q = debounced, p = page) {
     try {
-      const data = await api.get<StudentPage>('/admin/students', {
+      const res = await api.get<StudentPage | Student[]>('/admin/students', {
         q: q.trim() || undefined,
         page: p,
         per_page: PAGE_SIZE,
       })
-      if (data.students.length === 0 && data.total > 0 && p > 1) {
-        setPage(Math.max(1, Math.ceil(data.total / data.per_page)))
+      let list: Student[] = []
+      let totalCount = 0
+      if (Array.isArray(res)) {
+        list = res
+        totalCount = res.length
+      } else if (res && Array.isArray(res.students)) {
+        list = res.students
+        totalCount = res.total ?? res.students.length
+      }
+      if (list.length === 0 && totalCount > 0 && p > 1) {
+        setPage(Math.max(1, Math.ceil(totalCount / PAGE_SIZE)))
         return
       }
-      setStudents(data.students)
-      setTotal(data.total)
+      setStudents(list)
+      setTotal(totalCount)
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load students')
@@ -65,7 +74,15 @@ export function AdminStudents() {
   async function remove(s: Student) {
     if (!window.confirm(`Delete ${s.full_name}? Their attendance records will also be deleted.`)) return
     try {
-      await api.delete(`/admin/students/${s.id}`)
+      try {
+        await api.delete(`/admin/students/${s.id}`)
+      } catch (err: any) {
+        if (err?.status === 405) {
+          await api.post(`/admin/students/${s.id}/delete`)
+        } else {
+          throw err
+        }
+      }
       toast('Student deleted')
       if ((students?.length ?? 0) === 1 && page > 1) {
         setPage(page - 1)
@@ -245,9 +262,20 @@ function StudentForm({
         section: section.trim() || null,
         photo_url: photo.trim() || null,
       }
-      const saved = isEdit
-        ? await api.put<Student>(`/admin/students/${existing.id}`, body)
-        : await api.post<Student>('/admin/students', body)
+      let saved: Student
+      if (isEdit) {
+        try {
+          saved = await api.put<Student>(`/admin/students/${existing.id}`, body)
+        } catch (err: any) {
+          if (err?.status === 405) {
+            saved = await api.post<Student>(`/admin/students/${existing.id}/update`, body)
+          } else {
+            throw err
+          }
+        }
+      } else {
+        saved = await api.post<Student>('/admin/students', body)
+      }
       toast(isEdit ? 'Student saved' : 'Student created')
       onSaved(showQr ? saved : undefined)
       if (!showQr) onClose()
