@@ -2138,6 +2138,13 @@ BEGIN
                 v_effective_at := v_now;
             END IF;
         END IF;
+        IF v_result = 'ACCEPTED' AND v_qr_id IS NOT NULL THEN
+            UPDATE "EventSessionQrTokens"
+               SET "revokedAtUtc" = v_now,
+                   "revokedByUserId" = p_authenticated_user_id,
+                   "revocationReason" = 'Single-use self-scan'
+             WHERE "eventSessionQrTokenId" = v_qr_id AND "revokedAtUtc" IS NULL;
+        END IF;
     END IF;
 
     IF v_participant_id IS NOT NULL AND v_checked_in IS NOT NULL THEN
