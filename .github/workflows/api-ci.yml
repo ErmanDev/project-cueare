@@ -1,0 +1,140 @@
+name: API CI
+
+on:
+  pull_request:
+    paths:
+      - "apps/api/**"
+      - "infrastructure/containers/**"
+      - ".bun-version"
+      - ".dockerignore"
+      - ".github/workflows/api-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "apps/api/**"
+      - "infrastructure/containers/**"
+      - ".bun-version"
+      - ".dockerignore"
+      - ".github/workflows/api-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: api-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Typecheck, migrate, and test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18.6-alpine3.24
+        env:
+          POSTGRES_DB: ssc_ci
+          POSTGRES_USER: ssc_ci
+          POSTGRES_PASSWORD: ci-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ssc_ci -d ssc_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    defaults:
+      run:
+        working-directory: apps/api
+    env:
+      APP_ENV: test
+      AUTO_MIGRATE: "false"
+      DATABASE_HOST: 127.0.0.1
+      DATABASE_PORT: "5432"
+      DATABASE_NAME: ssc_ci
+      DATABASE_USER: ssc_ci
+      DATABASE_PASSWORD: ci-only-password
+      DATABASE_SSL_MODE: disable
+      JWT_SECRET: ci-only-jwt-secret
+      QR_HMAC_SECRET: ci-only-qr-secret
+      TEST_DATABASE_REQUIRED: "true"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up pinned Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bunx tsc --noEmit
+
+      - name: Verify and apply database migrations
+        run: |
+          bun run migrate:verify
+          bun run migrate:up
+          bun run migrate:verify
+
+      - name: Run tests
+        run: bun test --timeout 30000
+
+  container:
+    name: Build and scan container
+    needs: quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          load: true
+          push: false
+          tags: ssc-attendance-api:ci
+          build-args: |
+            RELEASE_VERSION=ci
+            RELEASE_REVISION=${{ github.sha }}
+            RELEASE_SOURCE=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Scan image for high-severity vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ssc-attendance-api:ci
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+
+  dependency-review:
+    name: Review dependency changes
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Block newly introduced vulnerable dependencies
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high

@@ -1,0 +1,96 @@
+import type { ReactNode } from 'react'
+import { Navigate, Route, Routes } from 'react-router-dom'
+
+import { ErrorBoundary } from './components/ErrorBoundary'
+import { Shell } from './components/Shell'
+import { BootSkeleton } from './components/ui'
+import { AuthProvider, useAuth } from './lib/auth'
+import { ErrorPage } from './pages/ErrorPage'
+import { ModeratorProvider } from './lib/moderator'
+import { ToastProvider } from './lib/toast'
+import type { Role } from './lib/types'
+import { AdminAttendance } from './pages/admin/Attendance'
+import { EventAttendanceDetail } from './pages/admin/EventAttendanceDetail'
+import { EventFines } from './pages/admin/EventFines'
+import { EventContributions } from './pages/admin/EventContributions'
+import { AdminDashboard } from './pages/admin/Dashboard'
+import { AdminEvents } from './pages/admin/Events'
+import { AdminFineTemplates } from './pages/admin/FineTemplates'
+import { AdminKiosks } from './pages/admin/Kiosks'
+import { AdminModerators } from './pages/admin/Moderators'
+import { AdminSections } from './pages/admin/Sections'
+import { AdminStudents } from './pages/admin/Students'
+import { LoginPage } from './pages/Login'
+import { ModeratorDashboard } from './pages/moderator/Dashboard'
+import { ModeratorHistory } from './pages/moderator/History'
+import { ModeratorScan } from './pages/moderator/Scan'
+
+function RequireRole({ role, children }: { role: Role; children: ReactNode }) {
+  const { user, ready } = useAuth()
+  if (!ready) return <BootSkeleton />
+  if (!user) return <Navigate to="/login" replace />
+  if (user.role !== role) {
+    return <Navigate to={user.role === 'superadmin' ? '/superadmin' : '/scanner'} replace />
+  }
+  return children
+}
+
+function AdminLayout() {
+  return (
+    <RequireRole role="superadmin">
+      <Shell />
+    </RequireRole>
+  )
+}
+
+function ModeratorLayout() {
+  return (
+    <RequireRole role="moderator">
+      <ModeratorProvider>
+        <Shell />
+      </ModeratorProvider>
+    </RequireRole>
+  )
+}
+
+function HomeRedirect() {
+  const { user, ready } = useAuth()
+  if (!ready) return <BootSkeleton />
+  if (!user) return <Navigate to="/login" replace />
+  return <Navigate to={user.role === 'superadmin' ? '/superadmin' : '/scanner'} replace />
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <ToastProvider>
+        <ErrorBoundary>
+          <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/superadmin" element={<AdminLayout />}>
+            <Route index element={<AdminDashboard />} />
+            <Route path="events" element={<AdminEvents />} />
+            <Route path="events/:eventId/attendance" element={<EventAttendanceDetail />} />
+            <Route path="events/:eventId/fines" element={<EventFines />} />
+            <Route path="events/:eventId/contributions" element={<EventContributions />} />
+            <Route path="fines" element={<AdminFineTemplates />} />
+            <Route path="academics" element={<AdminSections />} />
+            <Route path="sections" element={<Navigate to="/superadmin/academics" replace />} />
+            <Route path="students" element={<AdminStudents />} />
+            <Route path="moderators" element={<AdminModerators />} />
+            <Route path="attendance" element={<AdminAttendance />} />
+            <Route path="kiosks" element={<AdminKiosks />} />
+          </Route>
+          <Route path="/scanner" element={<ModeratorLayout />}>
+            <Route index element={<ModeratorDashboard />} />
+            <Route path="scan" element={<ModeratorScan />} />
+            <Route path="history" element={<ModeratorHistory />} />
+          </Route>
+          <Route path="/" element={<HomeRedirect />} />
+          <Route path="*" element={<ErrorPage kind="not-found" />} />
+          </Routes>
+        </ErrorBoundary>
+      </ToastProvider>
+    </AuthProvider>
+  )
+}

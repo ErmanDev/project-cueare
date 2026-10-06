@@ -1,0 +1,12 @@
+**/node_modules/
+**/.dart_tool/
+**/build/
+**/dist/
+**/dist-iis/
+**/.env
+**/.env.*
+!**/.env.example
+**/jwt_secret.txt
+**/*.dump
+apps/api/server.exe
+infrastructure/containers/*.env

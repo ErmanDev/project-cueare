@@ -35,13 +35,13 @@ Campus events (assemblies, activities) with Morning/Afternoon (or other) session
 - Product name: **SSC QR Attendance**
 - Campus: **ACSSCO Bukidnon Campus**
 - Voice: plain, operational, no hype. Errors already speak in short sentences (“Invalid username or password.” / “Could not sign in.”). The error page should stay **friendly and calm**, not alarming or jokey.
-- Assets: campus crest at `web/public/logo.png` (ACSSCO Bukidnon Campus logo).
+- Assets: campus crest at `apps/web/public/logo.png` (ACSSCO Bukidnon Campus logo).
 
 ## Evidence on Hand
 
-- Runnable React admin/moderator UI in `/web` (login, dashboards, events, students, sections, fines, attendance, scanner).
-- Campus logo at `web/public/logo.png`.
-- No DESIGN.md yet; visual identity lives in `web/src/index.css` and the login/shell screens.
+- Runnable React admin/moderator UI in `apps/web` (login, dashboards, events, students, sections, fines, attendance, scanner).
+- Campus logo at `apps/web/public/logo.png`.
+- Visual identity is documented in `DESIGN.md` and implemented in `apps/web/src/index.css` and the login/shell screens.
 - Do not invent testimonials, enrollment counts, or campus claims beyond what the UI already states.
 
 ## Product Principles

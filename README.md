@@ -1,29 +1,37 @@
 # SSC QR Attendance
 
-QR event attendance: an **Express + TypeScript + PostgreSQL** REST API behind
+QR event attendance: a migrating **NestJS/Express + TypeScript + PostgreSQL** REST API behind
 **Internet Information Services (IIS)** on Windows, a **React** admin/moderator web
 app, and a **Flutter** app for phones (Android/iOS) and Windows. Clients use the
 IIS host name — not a laptop LAN IP.
 
-```
-/server   Express + TypeScript REST API + PostgreSQL (Bun)
-/web      React + TypeScript admin & moderator UI
-/app      Flutter app (Android / iOS / Windows)
-/plan     Original build plan + backend / Postgres setup notes
+```text
+/apps/api                 NestJS migration host + legacy Express API + PostgreSQL
+/apps/web                 React admin and moderator UI
+/apps/mobile              Flutter Android, iOS, and Windows app
+/docs/operations          Deployment and database runbooks
+/docs/plans               Historical and active implementation plans
+/infrastructure/database  Standalone database artifacts
+/infrastructure/containers Production-like local/staging container topology
 ```
 
-**Postgres:** [`plan/POSTGRES_SETUP.md`](plan/POSTGRES_SETUP.md).  
-**IIS (how phones reach the server):** [`plan/IIS_SETUP.md`](plan/IIS_SETUP.md).
+**Postgres:** [`docs/operations/POSTGRES_SETUP.md`](docs/operations/POSTGRES_SETUP.md).
+
+**IIS:** [`docs/operations/IIS_SETUP.md`](docs/operations/IIS_SETUP.md).
+
+**Containers and CI:** [`docs/operations/CONTAINER_DEPLOYMENT.md`](docs/operations/CONTAINER_DEPLOYMENT.md).
+
+**Engineering standards:** [`docs/architecture/ENTERPRISE_GRADE_GUIDE.md`](docs/architecture/ENTERPRISE_GRADE_GUIDE.md).
 
 ## 1. PostgreSQL (one-time)
 
 You already need a running Postgres (Windows installer, Docker, or Laragon's Postgres
 addon). Your machine has `postgresql-x64-18` available.
 
-1. Create a `.env` in `/server` (copy from `.env.example`) and set your real password:
+1. Create a `.env` in `/apps/api` (copy from `.env.example`) and set your real password:
 
 ```powershell
-cd server
+cd apps/api
 copy .env.example .env
 # edit .env → DATABASE_PASSWORD=YOUR_POSTGRES_PASSWORD
 ```
@@ -64,28 +72,30 @@ Tables appear after the first server start / seed in schema `ssc` (`"Users"`,
 ## 2. Run the backend (localhost) and publish it with IIS
 
 ```powershell
-cd server
+cd apps/api
 bun install
 bun run build:web        # React UI → ../web/dist (once, or after web changes)
-bun run dev              # watch; listens on 127.0.0.1:8080
+bun run dev              # Nest migration host; listens on 127.0.0.1:8080
 ```
 
 For events, run without the file watcher:
 
 ```powershell
-bun start                # still 127.0.0.1:8080 — IIS is the public address
+bun start                # Nest + Express compatibility; IIS is the public address
 ```
+
+`bun run start:legacy` is the rollback entrypoint for the Express-only host.
 
 On this Windows machine only: [http://127.0.0.1:8080/](http://127.0.0.1:8080/) (admin/moderator
 web app), `/api`, and `/docs`.
 
 Then publish that process through IIS (host name on port 80 or 443). Follow
-[`plan/IIS_SETUP.md`](plan/IIS_SETUP.md). Do not point phones at a laptop IPv4 or at port 8080.
+[`docs/operations/IIS_SETUP.md`](docs/operations/IIS_SETUP.md). Do not point phones at a laptop IPv4 or at port 8080.
 
 During development you can also run the UI with Vite (proxies `/api` to port 8080):
 
 ```powershell
-cd web
+cd apps/web
 pnpm install
 pnpm dev                 # http://localhost:5173
 ```
@@ -94,8 +104,11 @@ If you skip `bun run build:web`, `/` still returns API JSON.
 
 Runtime file (git-ignored): `jwt_secret.txt` (auto-generated; delete it to invalidate all logins).
 
-Optional env vars: `DATABASE_URL` (or `DATABASE_HOST` / `PORT` / `NAME` / `USER` / `PASSWORD`),
-`JWT_SECRET`, `JWT_TTL_HOURS` (default 12), `QR_HMAC_SECRET`, `WEB_DIST` (override React dist folder).
+Production configuration uses `APP_ENV=production`, exact
+`CORS_ALLOWED_ORIGINS`, `TRUST_PROXY_HOPS`, strong `JWT_SECRET` and
+`QR_HMAC_SECRET` values, least-privilege database credentials, and an explicit
+`DATABASE_SSL_MODE`. See [`apps/api/.env.example`](apps/api/.env.example) and
+[`docs/operations/BACKEND_SETUP.md`](docs/operations/BACKEND_SETUP.md).
 
 Reset the admin password: `bun run seed-admin -- admin newpassword`.
 
@@ -104,7 +117,7 @@ Tests: `bun test` (unit tests always; attendance engine tests need Postgres).
 ## 3. Run the app (phones or Windows)
 
 ```powershell
-cd app
+cd apps/mobile
 flutter pub get
 flutter run            # or: flutter build apk --release
 ```
