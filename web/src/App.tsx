@@ -15,6 +15,7 @@ import { EventFines } from './pages/admin/EventFines'
 import { AdminDashboard } from './pages/admin/Dashboard'
 import { AdminEvents } from './pages/admin/Events'
 import { AdminFineTemplates } from './pages/admin/FineTemplates'
+import { AdminKiosks } from './pages/admin/Kiosks'
 import { AdminModerators } from './pages/admin/Moderators'
 import { AdminSections } from './pages/admin/Sections'
 import { AdminStudents } from './pages/admin/Students'
@@ -76,6 +77,7 @@ export default function App() {
             <Route path="students" element={<AdminStudents />} />
             <Route path="moderators" element={<AdminModerators />} />
             <Route path="attendance" element={<AdminAttendance />} />
+            <Route path="kiosks" element={<AdminKiosks />} />
           </Route>
           <Route path="/scanner" element={<ModeratorLayout />}>
             <Route index element={<ModeratorDashboard />} />

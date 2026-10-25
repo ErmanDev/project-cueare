@@ -1,3 +1,4 @@
+import '../core/utils/formatters.dart';
 import '../core/utils/json_values.dart';
 import 'session_window_model.dart';
 
@@ -32,7 +33,7 @@ class EventModel {
     id: asInt(json['id']) ?? 0,
     name: json['name'] as String? ?? '',
     eventDate:
-        DateTime.tryParse(json['event_date'] as String? ?? '') ??
+        Fmt.parseUtc(json['event_date'] as String?) ??
         DateTime.now(),
     isActive: json['is_active'] as bool? ?? true,
     isExpired: json['is_expired'] as bool? ?? false,

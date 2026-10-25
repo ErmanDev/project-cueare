@@ -1,3 +1,4 @@
+import '../core/utils/formatters.dart';
 import '../core/utils/json_values.dart';
 
 class AttendanceLogModel {
@@ -50,16 +51,16 @@ class AttendanceLogModel {
 
   factory AttendanceLogModel.fromJson(Map<String, dynamic> json) =>
       AttendanceLogModel(
-        id: json['id'] as int,
-        eventId: json['event_id'] as int,
-        studentId: json['student_id'] as int,
-        sessionWindowId: json['session_window_id'] as int,
-        direction: json['direction'] as String,
+        id: asInt(json['id']) ?? 0,
+        eventId: asInt(json['event_id']) ?? 0,
+        studentId: asInt(json['student_id']) ?? 0,
+        sessionWindowId: asInt(json['session_window_id']) ?? 0,
+        direction: json['direction'] as String? ?? 'IN',
         scannedAt:
-            DateTime.tryParse(json['scanned_at'] as String? ?? '') ??
+            Fmt.parseUtc(json['scanned_at'] as String?) ??
             DateTime.now(),
-        scannedBy: json['scanned_by'] as int? ?? 0,
-        status: json['status'] as String,
+        scannedBy: asInt(json['scanned_by']) ?? 0,
+        status: json['status'] as String? ?? 'confirmed',
         deviceNote: json['device_note'] as String?,
         studentIdCode: json['student_id_code'] as String?,
         studentName: json['student_name'] as String?,

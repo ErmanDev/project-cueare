@@ -718,13 +718,13 @@ SELECT
                     CASE WHEN p."isRequired" = TRUE THEN 'ABSENT' ELSE 'NOT_ATTENDED' END 
                 ELSE 'NOT_YET_RECORDED' 
             END
+        WHEN a."checkedInAtUtc" > s."lateAfterUtc" THEN 'LATE'
         WHEN s."requiresCheckOut" = TRUE AND a."checkedOutAtUtc" IS NULL THEN
             CASE 
                 WHEN s."isClosed" = TRUE OR e."eventStatusCode" = 'CLOSED' THEN 'INCOMPLETE' 
                 ELSE 'CHECKED_IN' 
             END
         WHEN s."requiresCheckOut" = TRUE AND EXTRACT(EPOCH FROM (a."checkedOutAtUtc" - a."checkedInAtUtc")) < (s."minimumMinutes" * 60) THEN 'INCOMPLETE'
-        WHEN a."checkedInAtUtc" > s."lateAfterUtc" THEN 'LATE'
         ELSE 'PRESENT'
     END AS "attendanceStatus"
 FROM "EventParticipants" p
@@ -2138,7 +2138,7 @@ BEGIN
                 v_effective_at := v_now;
             END IF;
         END IF;
-        IF v_result = 'ACCEPTED' AND v_qr_id IS NOT NULL THEN
+        IF (v_result = 'ACCEPTED' OR v_result = 'NO_CHANGE') AND v_qr_id IS NOT NULL THEN
             UPDATE "EventSessionQrTokens"
                SET "revokedAtUtc" = v_now,
                    "revokedByUserId" = p_authenticated_user_id,

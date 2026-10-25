@@ -1,3 +1,5 @@
+import '../core/utils/json_values.dart';
+
 class SessionWindowModel {
   const SessionWindowModel({
     required this.id,
@@ -21,11 +23,11 @@ class SessionWindowModel {
 
   factory SessionWindowModel.fromJson(Map<String, dynamic> json) =>
       SessionWindowModel(
-        id: json['id'] as int,
-        eventId: json['event_id'] as int? ?? 0,
-        sessionLabel: json['session_label'] as String,
-        startTime: json['start_time'] as String,
-        endTime: json['end_time'] as String,
-        sortOrder: json['sort_order'] as int? ?? 0,
+        id: asInt(json['id']) ?? 0,
+        eventId: asInt(json['event_id']) ?? 0,
+        sessionLabel: json['session_label'] as String? ?? 'Session',
+        startTime: json['start_time'] as String? ?? '',
+        endTime: json['end_time'] as String? ?? '',
+        sortOrder: asInt(json['sort_order']) ?? 0,
       );
 }

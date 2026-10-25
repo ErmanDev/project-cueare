@@ -12,6 +12,7 @@
     "build:web": "bun scripts/build-web.ts",
     "build:iis": "bun scripts/package-iis.ts",
     "ensure-db": "bun scripts/ensure-database.ts",
+    "reset-events-and-logs": "bun scripts/reset-events-and-logs.ts",
     "seed-admin": "bun scripts/seed-admin.ts",
     "seed-sample": "bun scripts/seed-sample.ts",
     "seed-fine-templates": "bun scripts/seed-fine-templates.ts",
@@ -24,12 +25,15 @@
     "bun": ">=1.2"
   },
   "dependencies": {
+    "@types/ws": "^8.18.1",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.16.3",
+    "socket.io": "^4.8.3",
     "swagger-ui-express": "^5.0.1",
+    "ws": "^8.21.3",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

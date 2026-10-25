@@ -84,15 +84,22 @@ class _StudentSelfScannerScreenState
     final raw = barcode?.rawValue?.trim();
     if (raw == null || raw.isEmpty) return;
 
+    // Pause camera scanning immediately to avoid rapid re-triggers
+    unawaited(_controller.stop());
+
     unawaited(HapticFeedback.selectionClick());
     await _processToken(raw);
   }
 
   Future<void> _processToken(String token) async {
     final now = DateTime.now();
+    // Ignore identical QR token for 60 seconds to prevent spam scanning
     if (_lastCode == token &&
         _lastCodeAt != null &&
-        now.difference(_lastCodeAt!).inMilliseconds < 2500) {
+        now.difference(_lastCodeAt!).inSeconds < 60) {
+      if (mounted && _cameraSupported) {
+        unawaited(_controller.start());
+      }
       return;
     }
 
@@ -118,6 +125,10 @@ class _StudentSelfScannerScreenState
     } finally {
       if (mounted) {
         setState(() => _busy = false);
+        // Resume camera only if screen is still mounted
+        if (_cameraSupported) {
+          unawaited(_controller.start());
+        }
       }
     }
   }
@@ -138,20 +149,27 @@ class _StudentSelfScannerScreenState
       isScrollControlled: true,
       builder: (context) {
         final isOk = result.isAccepted;
-        final color = isOk ? AppTheme.inColor : Theme.of(context).colorScheme.error;
+        final isLate = result.isLate;
+        final color = isOk
+            ? (isLate ? AppTheme.lateColor : AppTheme.inColor)
+            : Theme.of(context).colorScheme.error;
         return Padding(
           padding: const EdgeInsets.fromLTRB(24, 24, 24, 36),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
-                isOk ? Icons.check_circle_outline : Icons.error_outline,
+                isOk
+                    ? (isLate ? Icons.access_time_filled : Icons.check_circle_outline)
+                    : Icons.error_outline,
                 size: 64,
                 color: color,
               ),
               const SizedBox(height: 16),
               Text(
-                isOk ? 'Attendance Recorded' : 'Scan Rejected',
+                isOk
+                    ? (isLate ? 'Recorded (LATE)' : 'Attendance Recorded')
+                    : 'Scan Rejected',
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.bold,
                       color: color,
@@ -159,22 +177,48 @@ class _StudentSelfScannerScreenState
               ),
               const SizedBox(height: 8),
               Text(
-                result.userMessage,
+                isLate
+                    ? 'Check-in recorded after cutoff time (LATE).'
+                    : result.userMessage,
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
               if (result.eventName != null) ...[
                 const SizedBox(height: 12),
-                Chip(
-                  label: Text('${result.eventName} — ${result.sessionName ?? ""}'),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Chip(
+                      label: Text('${result.eventName} — ${result.sessionName ?? ""}'),
+                    ),
+                    if (isLate) ...[
+                      const SizedBox(width: 8),
+                      Chip(
+                        backgroundColor: AppTheme.lateColor.withValues(alpha: 0.15),
+                        side: BorderSide(color: AppTheme.lateColor),
+                        label: Text(
+                          'LATE',
+                          style: TextStyle(
+                            color: AppTheme.lateColor,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ],
               const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Scan another'),
+                  onPressed: () {
+                    Navigator.pop(context); // Close bottom sheet
+                    if (isOk && mounted) {
+                      Navigator.pop(context); // Return to student dashboard
+                    }
+                  },
+                  child: Text(isOk ? 'Done' : 'Scan another'),
                 ),
               ),
             ],

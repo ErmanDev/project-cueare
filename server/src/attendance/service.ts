@@ -166,7 +166,21 @@ export class AttendanceService {
         latestStarted = w;
       }
     }
-    return latestStarted;
+    if (latestStarted) return latestStarted;
+
+    // Fallback for EARLY check-in: pick earliest upcoming window on same day that is not closed
+    let earliestUpcoming: SessionWindowRow | null = null;
+    let minStart = 24 * 60 + 1;
+    for (const w of windows) {
+      if (w.is_closed) continue;
+      if (w.session_date && !isSameDay(time, new Date(`${w.session_date}T00:00:00`))) continue;
+      const start = parseMinutes(w.start_time);
+      if (start != null && start < minStart) {
+        minStart = start;
+        earliestUpcoming = w;
+      }
+    }
+    return earliestUpcoming;
   }
 
   async resolveWindow(args: {
@@ -236,7 +250,8 @@ export class AttendanceService {
       throw badRequest('Session window has invalid start_time/end_time');
     }
     const minutes = minutesOfDay(t);
-    if (minutes < start) {
+    const isOut = args.direction === DIRECTION.out;
+    if (isOut && minutes < start) {
       throw conflict(
         `Session "${args.window.session_label}" has not started yet ` +
           `(starts at ${args.window.start_time})`,
@@ -249,11 +264,7 @@ export class AttendanceService {
         },
       );
     }
-    const isOut = args.direction === DIRECTION.out;
-    const opens = isOut ? parseMinutes(args.window.out_start ?? args.window.start_time) ?? start : start;
-    if (!isOut && minutes < opens) {
-      throw conflict(`Check-in for "${args.window.session_label}" has not opened yet`);
-    }
+
     if (isOut) {
       const closes = parseMinutes(args.window.out_end ?? args.window.end_time) ?? end;
       if (minutes >= closes) {

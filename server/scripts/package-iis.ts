@@ -23,9 +23,12 @@ console.log('[build:iis] 2. Preparing IIS deployment package directory at:', dis
 fs.rmSync(distIisDir, { recursive: true, force: true });
 fs.mkdirSync(distIisDir, { recursive: true });
 
-// 1. Copy essential code directories
+// 1. Copy essential code directories and node_modules
 fs.cpSync(path.join(serverDir, 'public'), path.join(distIisDir, 'public'), { recursive: true });
 fs.cpSync(path.join(serverDir, 'src'), path.join(distIisDir, 'src'), { recursive: true });
+if (fs.existsSync(path.join(serverDir, 'node_modules'))) {
+  fs.cpSync(path.join(serverDir, 'node_modules'), path.join(distIisDir, 'node_modules'), { recursive: true });
+}
 
 // 2. Copy only essential production scripts (filtering out debug/temp scripts)
 const essentialScripts = [
@@ -70,6 +73,16 @@ for (const file of essentialFiles) {
   const dest = path.join(distIisDir, file);
   if (fs.existsSync(src)) {
     fs.copyFileSync(src, dest);
+  }
+}
+
+// Copy alternative IIS configs and use HttpPlatformHandler as default IIS web.config
+const iisSrcDir = path.join(serverDir, 'iis');
+if (fs.existsSync(iisSrcDir)) {
+  fs.cpSync(iisSrcDir, path.join(distIisDir, 'iis'), { recursive: true });
+  const httpPlatformConfig = path.join(iisSrcDir, 'web.httpplatform.config');
+  if (fs.existsSync(httpPlatformConfig)) {
+    fs.copyFileSync(httpPlatformConfig, path.join(distIisDir, 'web.config'));
   }
 }
 

@@ -63,7 +63,9 @@ class MyAttendanceScreen extends ConsumerWidget {
                             padding: const EdgeInsets.symmetric(vertical: 6),
                             child: Row(
                               children: [
-                                StatusChip.direction(l.direction),
+                                 l.status == 'LATE'
+                                     ? StatusChip.late()
+                                     : StatusChip.direction(l.direction),
                                 const SizedBox(width: 10),
                                 Expanded(
                                   child: Text(

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertCircle, Clock, LogIn, LogOut, Maximize2, Minimize2, RefreshCw, ShieldOff, Zap } from 'lucide-react'
 import { QRCodeCanvas } from 'qrcode.react'
 
@@ -21,7 +21,7 @@ export function VenueQrModal({
   onClose,
 }: VenueQrModalProps) {
   const [actionCode, setActionCode] = useState<'IN' | 'OUT'>('IN')
-  const [validForSeconds, setValidForSeconds] = useState<number>(60)
+  const [validForSeconds, setValidForSeconds] = useState<number>(0)
   const [token, setToken] = useState<VenueQrTokenResponse | null>(null)
   const [loading, setLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
@@ -39,7 +39,7 @@ export function VenueQrModal({
         `/admin/event-sessions/${sessionWindowId}/qr-tokens`,
         {
           actionCode,
-          validForSeconds,
+          validForSeconds: validForSeconds === 0 ? 3600 : validForSeconds,
           overlapSeconds: 5,
         },
       )
@@ -56,9 +56,16 @@ export function VenueQrModal({
     }
   }, [sessionWindowId, actionCode, validForSeconds])
 
+  const fetchQrTokenRef = useRef(fetchQrToken)
+  useEffect(() => {
+    fetchQrTokenRef.current = fetchQrToken
+  }, [fetchQrToken])
+
   useEffect(() => {
     fetchQrToken()
   }, [fetchQrToken])
+
+  const [sseConnected, setSseConnected] = useState<boolean>(false)
 
   // Real-time SSE listener for instant QR rotation on student scan
   useEffect(() => {
@@ -68,27 +75,42 @@ export function VenueQrModal({
     const url = `/api/v1/attendance/event-qr/stream?session_window_id=${sessionWindowId}&token=${encodeURIComponent(authToken)}`
     const es = new EventSource(url)
 
+    es.onopen = () => {
+      setSseConnected(true)
+    }
+
     es.addEventListener('qr_scanned', (ev) => {
       try {
-        const data = JSON.parse(ev.data) as { studentFullName?: string; studentNumber?: string }
+        const data = JSON.parse(ev.data) as { scanResultCode?: string; studentFullName?: string; studentNumber?: string }
         const name = data.studentFullName || data.studentNumber || 'Student'
-        setLastScanNotice(`Scan Accepted: ${name} — Instantly Rotated!`)
-        void fetchQrToken()
+        if (data.scanResultCode === 'ACCEPTED') {
+          setLastScanNotice(`Scan Accepted: ${name} — Instantly Rotated!`)
+          void fetchQrTokenRef.current()
+        } else if (data.scanResultCode === 'NO_CHANGE') {
+          setLastScanNotice(`Already Recorded: ${name} (QR Unchanged)`)
+        } else {
+          setLastScanNotice(`Scan Processed: ${name}`)
+        }
 
         setTimeout(() => setLastScanNotice(null), 4000)
       } catch {
-        void fetchQrToken()
+        /* ignore parse errors */
       }
     })
+
+    es.onerror = (err) => {
+      setSseConnected(false)
+      console.warn('[SSE] EventSource stream error:', err)
+    }
 
     return () => {
       es.close()
     }
-  }, [sessionWindowId, fetchQrToken])
+  }, [sessionWindowId])
 
-  // Countdown and auto-refresh timer
+  // Countdown and auto-refresh timer (skipped when validForSeconds === 0)
   useEffect(() => {
-    if (!token || revoked) return
+    if (!token || revoked || validForSeconds === 0) return
 
     const interval = setInterval(() => {
       const expires = new Date(token.expiresAtUtc).getTime()
@@ -97,14 +119,14 @@ export function VenueQrModal({
 
       if (diffSec <= 0) {
         // Token expired -> issue next token automatically
-        fetchQrToken()
+        fetchQrTokenRef.current()
       } else {
         setRemainingSeconds(diffSec)
       }
     }, 1000)
 
     return () => clearInterval(interval)
-  }, [token, revoked, fetchQrToken])
+  }, [token, revoked, validForSeconds])
 
   async function handleRevoke() {
     if (!token || revoked) return
@@ -246,7 +268,23 @@ export function VenueQrModal({
         `}</style>
 
         <div className="venue-qr-header">
-          <h3>{sessionLabel}</h3>
+          <h3>
+            {sessionLabel}
+            {sseConnected ? (
+              <span
+                style={{
+                  display: 'inline-block',
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  backgroundColor: '#10b981',
+                  marginLeft: 8,
+                  boxShadow: '0 0 8px #10b981',
+                }}
+                title="Live SSE Connected"
+              />
+            ) : null}
+          </h3>
           <div className="venue-qr-subtitle">{eventName}</div>
         </div>
 
@@ -296,6 +334,8 @@ export function VenueQrModal({
             value={validForSeconds}
             onChange={(e) => setValidForSeconds(Number(e.target.value))}
           >
+            <option value={0}>Rotate on scan only (No timer)</option>
+            <option value={15}>Rotate every 15s</option>
             <option value={30}>Rotate every 30s</option>
             <option value={60}>Rotate every 60s</option>
             <option value={120}>Rotate every 2m</option>
@@ -359,7 +399,7 @@ export function VenueQrModal({
               <div
                 className="venue-qr-timer-fill"
                 style={{
-                  width: `${progressPercent}%`,
+                  width: validForSeconds === 0 ? '100%' : `${progressPercent}%`,
                   backgroundColor: actionCode === 'IN' ? '#10b981' : '#f59e0b',
                 }}
               />
@@ -376,7 +416,7 @@ export function VenueQrModal({
               }}
             >
               <Clock size={13} />
-              <span>Rotates in {remainingSeconds}s</span>
+              <span>{validForSeconds === 0 ? 'Rotates on student scan (Timer disabled)' : `Rotates in ${remainingSeconds}s`}</span>
             </div>
           </div>
         ) : null}

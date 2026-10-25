@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Archive, Banknote, ClipboardList, Filter, Plus, QrCode, Search, Send, SquarePen, Trash2, Users, X } from 'lucide-react'
+import { Archive, Banknote, ClipboardList, Filter, Megaphone, Plus, QrCode, Search, Send, SquarePen, Trash2, Users, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
+import { EventAnnouncementModal } from '../../components/EventAnnouncementModal'
 import { EventRosterModal } from '../../components/EventRosterModal'
 import { VenueQrModal } from '../../components/VenueQrModal'
 import { Button, ConfirmDialog, EmptyState, Field, FormActions, Modal, TableSkeleton, onSubmit } from '../../components/ui'
@@ -121,6 +122,7 @@ export function AdminEvents() {
     sessionWindowId: number
     sessionLabel: string
   } | null>(null)
+  const [announcementEvent, setAnnouncementEvent] = useState<Event | null>(null)
 
   async function load() {
     try {
@@ -425,6 +427,13 @@ export function AdminEvents() {
                           </button>
                           <button
                             className="icon-btn"
+                            title="Broadcast live announcement"
+                            onClick={() => setAnnouncementEvent(e)}
+                          >
+                            <Megaphone size={16} className="text-red-500" />
+                          </button>
+                          <button
+                            className="icon-btn"
                             title="Generate registrations and QR passes"
                             onClick={() => void syncRoster(e)}
                           >
@@ -489,6 +498,13 @@ export function AdminEvents() {
           sessionWindowId={venueQrSession.sessionWindowId}
           sessionLabel={venueQrSession.sessionLabel}
           onClose={() => setVenueQrSession(null)}
+        />
+      ) : null}
+      {announcementEvent ? (
+        <EventAnnouncementModal
+          eventId={announcementEvent.id}
+          eventName={announcementEvent.name}
+          onClose={() => setAnnouncementEvent(null)}
         />
       ) : null}
       {pendingDelete ? (

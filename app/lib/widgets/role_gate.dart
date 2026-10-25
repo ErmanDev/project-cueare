@@ -34,6 +34,7 @@ class RoleGate extends ConsumerWidget {
         StaffSession(:final user) => switch (user.role) {
           UserRole.superadmin => const SuperadminDashboardScreen(),
           UserRole.moderator => const ModeratorDashboardScreen(),
+          UserRole.student => StudentHomeScreen(studentIdCode: user.username),
         },
       },
     );

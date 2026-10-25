@@ -1,3 +1,5 @@
+import '../core/utils/formatters.dart';
+import '../core/utils/json_values.dart';
 import 'student_model.dart';
 
 /// Response of POST /moderator/scan/preview.
@@ -44,30 +46,32 @@ class ScanPreviewModel {
   bool get isOut => computedDirection == 'OUT';
 
   factory ScanPreviewModel.fromJson(Map<String, dynamic> json) {
-    final session = json['computed_session'] as Map<String, dynamic>;
-    final event = json['event'] as Map<String, dynamic>;
+    final event = (json['event'] ?? json['computed_event']) as Map<String, dynamic>? ?? const {};
+    final session = (json['session'] ?? json['computed_session']) as Map<String, dynamic>? ?? const {};
+    final studentMap = json['student'] as Map<String, dynamic>? ?? const {};
+
     return ScanPreviewModel(
-      student: StudentModel.fromJson(json['student'] as Map<String, dynamic>),
-      eventId: event['id'] as int,
+      student: StudentModel.fromJson(studentMap),
+      eventId: asInt(event['id']) ?? asInt(json['event_id']) ?? 0,
       eventName: event['name'] as String? ?? '',
-      sessionWindowId: session['id'] as int,
-      sessionLabel: session['session_label'] as String,
+      sessionWindowId: asInt(session['id']) ?? asInt(json['session_window_id']) ?? 0,
+      sessionLabel: session['session_label'] as String? ?? 'Session',
       sessionStart: session['start_time'] as String? ?? '',
       sessionEnd: session['end_time'] as String? ?? '',
       sessionMode: session['mode'] as String? ?? 'auto',
-      computedDirection: json['computed_direction'] as String,
+      computedDirection: json['computed_direction'] as String? ?? 'IN',
       isLate: json['is_late'] as bool? ?? false,
       isEarlyOut: json['is_early_out'] as bool? ?? false,
       canConfirm: json['can_confirm'] as bool? ?? true,
       serverTime:
-          DateTime.tryParse(json['server_time'] as String? ?? '') ??
+          Fmt.parseUtc(json['server_time'] as String?) ??
           DateTime.now(),
       existingScans: (json['existing_scans'] as List<dynamic>? ?? []).map((e) {
-        final m = e as Map<String, dynamic>;
+        final m = e as Map<String, dynamic>? ?? const {};
         return (
-          direction: m['direction'] as String,
+          direction: m['direction'] as String? ?? 'IN',
           scannedAt:
-              DateTime.tryParse(m['scanned_at'] as String? ?? '') ??
+              Fmt.parseUtc(m['scanned_at'] as String?) ??
               DateTime.now(),
         );
       }).toList(),

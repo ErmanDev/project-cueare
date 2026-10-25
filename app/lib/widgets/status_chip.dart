@@ -33,6 +33,12 @@ class StatusChip extends StatelessWidget {
     tone: StatusChipTone.danger,
   );
 
+  factory StatusChip.late() => const StatusChip(
+    label: 'IN (LATE)',
+    tone: StatusChipTone.warning,
+    icon: Icons.access_time_filled,
+  );
+
   factory StatusChip.direction(String direction, {bool blocked = false}) {
     if (blocked) {
       return const StatusChip(

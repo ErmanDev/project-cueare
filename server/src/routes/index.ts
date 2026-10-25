@@ -103,9 +103,10 @@ export function mountRestApi(app: Express, prefix = ''): void {
           message = result.failureReasonCode.replace(/_/g, ' ');
         }
 
-        if (isAccepted && result.eventSessionId) {
+        if (result.eventSessionId) {
           broadcastQrScanEvent(result.eventSessionId, {
             scanResultCode: result.scanResultCode,
+            failureReasonCode: result.failureReasonCode,
             studentNumber: result.studentNumber,
             studentFullName: result.studentFullName,
             actionRecorded: result.actionRecorded,

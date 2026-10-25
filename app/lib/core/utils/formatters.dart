@@ -7,11 +7,23 @@ abstract class Fmt {
   static final _dateTime = DateFormat('MMM d, h:mm a');
   static final _weekday = DateFormat('EEEE, MMM d, yyyy');
 
-  static String date(DateTime d) => _date.format(d);
-  static String dateShort(DateTime d) => _dateShort.format(d);
-  static String time(DateTime d) => _time.format(d);
-  static String dateTime(DateTime d) => _dateTime.format(d);
-  static String weekday(DateTime d) => _weekday.format(d);
+  static DateTime? parseUtc(String? raw) {
+    if (raw == null || raw.trim().isEmpty) return null;
+    var s = raw.trim();
+    if (s.contains(' ') && !s.contains('T')) {
+      s = s.replaceFirst(' ', 'T');
+    }
+    if (!s.endsWith('Z') && !s.contains('+') && !RegExp(r'-\d{2}:\d{2}$').hasMatch(s)) {
+      s += 'Z';
+    }
+    return DateTime.tryParse(s)?.toLocal();
+  }
+
+  static String date(DateTime d) => _date.format(d.toLocal());
+  static String dateShort(DateTime d) => _dateShort.format(d.toLocal());
+  static String time(DateTime d) => _time.format(d.toLocal());
+  static String dateTime(DateTime d) => _dateTime.format(d.toLocal());
+  static String weekday(DateTime d) => _weekday.format(d.toLocal());
 
   /// "HH:mm" → "7:00 AM"
   static String hhmm(String hhmm) {

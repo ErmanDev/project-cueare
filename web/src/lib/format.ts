@@ -40,7 +40,14 @@ const weekdayFmt = new Intl.DateTimeFormat(undefined, {
 function asDate(d: Date | string | null | undefined): Date | null {
   if (d instanceof Date) return Number.isNaN(d.getTime()) ? null : d
   if (typeof d !== 'string' || !d.trim()) return null
-  const date = new Date(d)
+  let str = d.trim()
+  if (str.includes(' ') && !str.includes('T')) {
+    str = str.replace(' ', 'T')
+  }
+  if (!str.endsWith('Z') && !str.includes('+') && !/-\d{2}:\d{2}$/.test(str)) {
+    str += 'Z'
+  }
+  const date = new Date(str)
   return Number.isNaN(date.getTime()) ? null : date
 }
 

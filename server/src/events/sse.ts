@@ -10,8 +10,9 @@ const clients = new Set<Client>();
 
 export function subscribeQrScanStream(req: Request, res: Response, sessionWindowId: number): void {
   res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders?.();
 
   const clientId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
@@ -20,12 +21,24 @@ export function subscribeQrScanStream(req: Request, res: Response, sessionWindow
   clients.add(client);
 
   // Initial heartbeat
-  res.write(`event: connected\ndata: ${JSON.stringify({ clientId, sessionWindowId })}\n\n`);
+  try {
+    res.write(`event: connected\ndata: ${JSON.stringify({ clientId, sessionWindowId })}\n\n`);
+    (res as unknown as { flush?: () => void }).flush?.();
+  } catch {
+    clients.delete(client);
+    return;
+  }
 
-  // Heartbeat every 25 seconds to keep connection alive
+  // Heartbeat every 20 seconds to keep connection alive
   const heartbeat = setInterval(() => {
-    res.write(': heartbeat\n\n');
-  }, 25000);
+    try {
+      res.write(': heartbeat\n\n');
+      (res as unknown as { flush?: () => void }).flush?.();
+    } catch {
+      clearInterval(heartbeat);
+      clients.delete(client);
+    }
+  }, 20000);
 
   req.on('close', () => {
     clearInterval(heartbeat);
@@ -33,11 +46,13 @@ export function subscribeQrScanStream(req: Request, res: Response, sessionWindow
   });
 }
 
-export function broadcastQrScanEvent(sessionWindowId: number, payload: Record<string, unknown>): void {
+export function broadcastQrScanEvent(sessionWindowId: number | string, payload: Record<string, unknown>): void {
+  const targetId = String(sessionWindowId);
   for (const client of clients) {
-    if (client.sessionWindowId === sessionWindowId) {
+    if (String(client.sessionWindowId) === targetId) {
       try {
         client.res.write(`event: qr_scanned\ndata: ${JSON.stringify(payload)}\n\n`);
+        (client.res as unknown as { flush?: () => void }).flush?.();
       } catch {
         clients.delete(client);
       }

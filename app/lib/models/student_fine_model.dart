@@ -41,15 +41,15 @@ class StudentFineModel {
 
   factory StudentFineModel.fromJson(Map<String, dynamic> json) =>
       StudentFineModel(
-        assessmentId: asInt(json['assessment_id']) ?? 0,
-        eventId: asInt(json['event_id']) ?? 0,
-        eventName: json['event_name'] as String? ?? 'Event',
-        sessionName: json['session_name'] as String? ?? 'Session',
-        violationCode: json['violation_code'] as String? ?? '',
-        assessedAmount: _money(json['assessed_amount']),
-        outstandingAmount: _money(json['outstanding_amount']),
-        status: json['status'] as String? ?? '',
-        currencyCode: json['currency_code'] as String? ?? 'PHP',
+        assessmentId: asInt(json['assessment_id']) ?? asInt(json['studentFineAssessmentId']) ?? 0,
+        eventId: asInt(json['event_id']) ?? asInt(json['eventId']) ?? 0,
+        eventName: json['event_name'] as String? ?? json['eventName'] as String? ?? 'Event',
+        sessionName: json['session_name'] as String? ?? json['sessionName'] as String? ?? 'Session',
+        violationCode: json['violation_code'] as String? ?? json['violationCode'] as String? ?? '',
+        assessedAmount: _money(json['assessed_amount'] ?? json['assessedAmount']),
+        outstandingAmount: _money(json['outstanding_amount'] ?? json['outstandingAmount']),
+        status: json['status'] as String? ?? json['assessmentStatusCode'] as String? ?? '',
+        currencyCode: json['currency_code'] as String? ?? json['currencyCode'] as String? ?? 'PHP',
       );
 }
 

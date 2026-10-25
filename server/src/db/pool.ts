@@ -27,7 +27,9 @@ export function createPool(config: DatabaseConfig = getConfig().database, schema
     user: config.user,
     password: config.password,
     ssl: false,
-    max: 10,
+    max: Number(process.env.PG_MAX_POOL || 30),
+    connectionTimeoutMillis: 5000,
+    idleTimeoutMillis: 30000,
   });
 
   pool.on('error', (err) => {

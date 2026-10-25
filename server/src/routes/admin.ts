@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
 import { Router, type Request } from 'express';
 
+import { broadcastEventAnnouncement } from '../realtime/socket_server.ts';
+import { getKioskPresenceList } from '../realtime/kiosk_ws.ts';
 import { AttendanceService } from '../attendance/service.ts';
 import { hashPassword } from '../auth/password.ts';
 import * as q from '../db/queries.ts';
@@ -2285,4 +2287,97 @@ adminRouter.post(
     res.json({ status: 'ok', userId, studentId });
   }),
 );
+
+// --- Real-time Event Announcements & Kiosk Presence ---
+
+adminRouter.post(
+  '/events/:id/announcements',
+  asyncHandler(async (req, res) => {
+    const eventId = parsePathId(req.params.id);
+    const body = jsonObject(req);
+    const title = requireString(body, 'title');
+    const message = requireString(body, 'message');
+    const levelInput = (optionalString(body, 'level') ?? 'INFO').toUpperCase();
+    const level = (['INFO', 'WARNING', 'URGENT'].includes(levelInput) ? levelInput : 'INFO') as 'INFO' | 'WARNING' | 'URGENT';
+    const actorUserId = req.auth?.id ?? 1;
+
+    const event = await q.getEventById(getPool(), eventId);
+    if (!event) throw notFound('Event not found');
+
+    const result = await getPool().query(
+      `INSERT INTO "EventAnnouncements" ("eventId", "title", "message", "levelCode", "postedByUserId", "createdAtUtc")
+       VALUES ($1, $2, $3, $4, $5, NOW())
+       RETURNING "eventAnnouncementId", "createdAtUtc"`,
+      [eventId, title, message, level, actorUserId],
+    );
+
+    const announcementId = Number(result.rows[0].eventAnnouncementId);
+    const createdAtUtc = new Date(result.rows[0].createdAtUtc).toISOString();
+
+    const payload = {
+      announcementId,
+      eventId,
+      title,
+      message,
+      level,
+      postedByName: req.auth?.username ?? 'Admin',
+      createdAtUtc,
+    };
+
+    // Broadcast live over Socket.IO room (room:event_<eventId>)
+    broadcastEventAnnouncement(eventId, payload);
+
+    res.status(201).json(payload);
+  }),
+);
+
+adminRouter.get(
+  '/events/:id/announcements',
+  asyncHandler(async (req, res) => {
+    const eventId = parsePathId(req.params.id);
+    const result = await getPool().query(
+      `SELECT ea."eventAnnouncementId", ea."eventId", ea."title", ea."message", ea."levelCode" AS level,
+              ea."createdAtUtc", u."name" AS "postedByName"
+       FROM "EventAnnouncements" ea
+       JOIN "Users" u ON u."userId" = ea."postedByUserId"
+       WHERE ea."eventId" = $1
+       ORDER BY ea."eventAnnouncementId" DESC
+       LIMIT 50`,
+      [eventId],
+    );
+    res.json(result.rows);
+  }),
+);
+
+adminRouter.get(
+  '/kiosks',
+  asyncHandler(async (_req, res) => {
+    const livePresence = getKioskPresenceList();
+    const dbDevices = await getPool().query(`
+      SELECT "deviceId", "deviceCode", "deviceName", "location", "isActive", "lastHeartbeatAtUtc", "lastIpAddress"
+      FROM "AttendanceDevices"
+      ORDER BY "deviceCode" ASC
+    `);
+
+    // Merge live presence with DB records
+    const presenceMap = new Map(livePresence.map((p) => [p.deviceCode, p]));
+    const list = dbDevices.rows.map((d) => {
+      const live = presenceMap.get(d.deviceCode);
+      const isLiveOnline = live?.status === 'ONLINE';
+      return {
+        deviceId: d.deviceId,
+        deviceCode: d.deviceCode,
+        deviceName: d.deviceName,
+        location: d.location,
+        isActive: d.isActive,
+        status: isLiveOnline ? 'ONLINE' : 'OFFLINE',
+        lastHeartbeatAtUtc: live?.lastPingAt ?? d.lastHeartbeatAtUtc,
+        ipAddress: live?.ipAddress ?? d.lastIpAddress,
+      };
+    });
+
+    res.json(list);
+  }),
+);
+
 

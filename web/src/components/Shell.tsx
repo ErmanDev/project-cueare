@@ -3,6 +3,7 @@ import {
   CalendarDays,
   ClipboardCheck,
   GraduationCap,
+  HardDrive,
   History,
   IdCard,
   Layers,
@@ -28,6 +29,7 @@ const adminNav = [
   { to: '/superadmin/students', label: 'Students', icon: GraduationCap },
   { to: '/superadmin/moderators', label: 'Moderators', icon: IdCard },
   { to: '/superadmin/attendance', label: 'Attendance', icon: ClipboardCheck },
+  { to: '/superadmin/kiosks', label: 'Kiosks', icon: HardDrive },
 ]
 
 const moderatorNav = [

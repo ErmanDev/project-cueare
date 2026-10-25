@@ -33,12 +33,10 @@ class StudentEventSessionModel {
       StudentEventSessionModel(
         sessionId: asInt(json['session_id']) ?? 0,
         sessionName: json['session_name'] as String? ?? 'Session',
-        sessionDate: DateTime.tryParse(json['session_date'] as String? ?? ''),
+        sessionDate: Fmt.parseUtc(json['session_date'] as String?),
         status: json['status'] as String? ?? 'PENDING',
-        checkedInAt: DateTime.tryParse(json['checked_in_at_utc'] as String? ?? ''),
-        checkedOutAt: DateTime.tryParse(
-          json['checked_out_at_utc'] as String? ?? '',
-        ),
+        checkedInAt: Fmt.parseUtc(json['checked_in_at_utc'] as String?),
+        checkedOutAt: Fmt.parseUtc(json['checked_out_at_utc'] as String?),
       );
 }
 

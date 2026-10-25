@@ -50,9 +50,19 @@ class SelfScanResultModel {
   bool get isAccepted =>
       scanResultCode == 'ACCEPTED' || scanResultCode == 'NO_CHANGE';
 
+  bool get isLate => attendanceStatus == 'LATE';
+
   String get userMessage {
     if (isAccepted) return message;
     return switch (failureReasonCode) {
+      'OUTSIDE_CHECKIN_WINDOW' =>
+        'Outside Check-in Window: Check-in is not open at this time.',
+      'OUTSIDE_CHECKOUT_WINDOW' =>
+        'Outside Check-out Window: Check-out is not open at this time.',
+      'CHECKIN_REQUIRED_FIRST' =>
+        'Check-in Required: You must check in before checking out.',
+      'SESSION_NOT_STARTED' =>
+        'Session Not Started: Attendance check-in has not opened yet.',
       'STUDENT_ACCOUNT_NOT_LINKED' =>
         'Account Not Linked: Your user account is not linked to a student profile. Ask an admin to link your account.',
       'NOT_ON_SESSION_ROSTER' =>
@@ -62,7 +72,7 @@ class SelfScanResultModel {
       'INVALID_QR_TOKEN' =>
         'Invalid QR: Scanned code is not a valid venue QR token.',
       'REVOKED_QR_TOKEN' =>
-        'QR Revoked: This venue QR token was revoked by an admin.',
+        'QR Already Used / Revoked: This single-use QR token was already scanned or revoked.',
       'SESSION_CLOSED' =>
         'Session Closed: Attendance check-in for this session is closed.',
       'EVENT_NOT_PUBLISHED' =>
